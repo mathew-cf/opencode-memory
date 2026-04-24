@@ -285,11 +285,18 @@ Both search backends ship as npm dependencies with prebuilt binaries:
 
 No manual install is needed — `npm install` (or whatever installs this plugin) pulls in both and resolves them via `require.resolve` at runtime. Nothing depends on `$PATH`.
 
-After install, run once to pre-cache the embedding model (optional but makes the first semantic search instant):
+### One-shot bootstrap
+
+The plugin ships a CLI that does everything in one step:
 
 ```bash
-memory_setup   # reports which backends are resolvable
-rag download   # downloads the MiniLM-L6 weights (~90MB)
+bunx @mathew-cf/opencode-memory init
 ```
 
-If a backend fails to install (unsupported platform, etc.), the tools degrade gracefully — `memory_search` still returns whatever the available backend can find. Call `memory_setup` any time to see install guidance for the missing piece.
+This creates the memory dir if missing, runs `git init`, scaffolds the category subdirs, and downloads the embedding model. Idempotent — safe to re-run.
+
+Other CLI subcommands:
+- `bunx @mathew-cf/opencode-memory status` — report backend resolution (same as `memory_setup` tool)
+- `bunx @mathew-cf/opencode-memory init --skip-model` — bootstrap dirs only, defer the download
+
+If a backend fails to install (unsupported platform, etc.), the tools degrade gracefully — `memory_search` still returns whatever the available backend can find.

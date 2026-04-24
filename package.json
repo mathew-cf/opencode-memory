@@ -1,6 +1,6 @@
 {
   "name": "@mathew-cf/opencode-memory",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Persistent cross-session memory for OpenCode \u2014 a hybrid keyword + semantic search layer over a local markdown knowledge base, plus session history tools and guardrails that nudge agents to use them.",
   "author": "mat",
   "license": "Apache-2.0",
@@ -11,12 +11,15 @@
   "type": "module",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
+  "bin": {
+    "opencode-memory": "dist/cli.js"
+  },
   "files": [
     "dist",
     "skills"
   ],
   "scripts": {
-    "build": "bun build src/index.ts --outdir dist --target node && tsc --emitDeclarationOnly",
+    "build": "bun build src/index.ts src/cli.ts --outdir dist --target node && tsc --emitDeclarationOnly",
     "test": "bun test",
     "prepublishOnly": "bun run build",
     "typecheck": "tsc --noEmit",

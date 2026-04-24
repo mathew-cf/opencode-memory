@@ -23,9 +23,17 @@ LLM agents forget everything between sessions. That means rediscovering the same
 ```jsonc
 // opencode.jsonc
 {
-  "plugin": ["@mathew-cf/opencode-memory@0.2.0"]
+  "plugin": ["@mathew-cf/opencode-memory@0.3.0"]
 }
 ```
+
+Then bootstrap the memory directory + embedding model:
+
+```bash
+bunx @mathew-cf/opencode-memory init
+```
+
+This creates `~/opencode-memory/` (git repo, 7 category subdirs) and downloads the ~90MB embedding model. Idempotent — safe to re-run. Pass `--skip-model` to defer the download.
 
 The plugin auto-registers:
 
@@ -56,12 +64,19 @@ If either dependency fails to install (unusual — usually indicates an unsuppor
 
 ### First-time setup
 
-```
-mkdir -p ~/opencode-memory
-cd ~/opencode-memory && git init
+```bash
+bunx @mathew-cf/opencode-memory init
 ```
 
-Categories are conventional directories under the root — `preferences/`, `repos/`, `technical/`, `people/`, `workflows/`, `snippets/`, `notes/`. They're advisory, not enforced.
+Creates `~/opencode-memory/` (or `$MEMORY_DIR`), runs `git init`, scaffolds the 7 advisory category subdirs (`preferences/`, `repos/`, `technical/`, `people/`, `workflows/`, `snippets/`, `notes/`), and pre-caches the embedding model for semantic search.
+
+Subcommands:
+
+| Command                                         | Purpose                                                |
+| ----------------------------------------------- | ------------------------------------------------------ |
+| `bunx @mathew-cf/opencode-memory init`          | Create + git-init memory dir, download embedding model |
+| `bunx @mathew-cf/opencode-memory init --skip-model` | Same, but skip the ~90MB download                  |
+| `bunx @mathew-cf/opencode-memory status`        | Report which search backends are resolvable           |
 
 ### Writing memory
 
