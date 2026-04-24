@@ -14,6 +14,12 @@ import { resolveMemoryDir } from "./lib/paths";
  * The snippet appended to subagent prompts. Captured in one place so
  * tests can snapshot it and users can `Edit` it locally if they want a
  * different emphasis.
+ *
+ * Sections beyond "Memory & Sessions" / "Discoveries worth saving" are
+ * generic agent-quality nudges that pair naturally with the memory
+ * protocol — they describe how to deliver an answer once you've done
+ * the search work. They're scoped tight enough not to crowd out the
+ * memory bits but useful enough to ship as opinionated defaults.
  */
 export const MEMORY_PROMPT_APPENDIX = `## Memory & Sessions
 
@@ -27,7 +33,15 @@ If you can't write to memory, end your response with:
 
 ## Ground in code
 
-NEVER answer questions about a codebase from training data. Always open the actual files first.`;
+NEVER answer questions about a codebase from training data. Always open the actual files first.
+
+## Synthesis
+
+End with: a clear conclusion (recommendation, diagnosis, or finding), your confidence level, any conflicts or open questions, and concrete next steps where applicable.
+
+## Source age
+
+Flag anything > 1 year old as potentially stale.`;
 
 /**
  * Subagents that should get the memory prompt appendix. These are the
