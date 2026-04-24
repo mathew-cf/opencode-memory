@@ -32,7 +32,7 @@
     "persistence"
   ],
   "dependencies": {
-    "@mathew-cf/rag-cli": "^0.3.3",
+    "@mathew-cf/rag-cli": "^0.4.0",
     "@vscode/ripgrep": "^1.17.1"
   },
   "devDependencies": {
