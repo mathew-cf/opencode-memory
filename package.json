@@ -1,0 +1,43 @@
+{
+  "name": "@mathew-cf/opencode-memory",
+  "version": "0.1.0",
+  "description": "Persistent cross-session memory for OpenCode — a hybrid keyword + semantic search layer over a local markdown knowledge base, plus session history tools and guardrails that nudge agents to use them.",
+  "author": "mat",
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/mathew-cf/opencode-memory"
+  },
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "files": [
+    "dist",
+    "skills"
+  ],
+  "scripts": {
+    "build": "bun build src/index.ts --outdir dist --target node && tsc --emitDeclarationOnly",
+    "test": "bun test",
+    "prepublishOnly": "bun run build",
+    "typecheck": "tsc --noEmit",
+    "sync-version": "bun scripts/sync-version.ts",
+    "version": "bun run sync-version && git add README.md"
+  },
+  "keywords": [
+    "opencode",
+    "opencode-plugin",
+    "memory",
+    "rag",
+    "semantic-search",
+    "persistence"
+  ],
+  "devDependencies": {
+    "@opencode-ai/plugin": "^1.1.49",
+    "@types/bun": "^1.3.12",
+    "@types/node": "^22.0.0",
+    "typescript": "^5.0.0"
+  },
+  "peerDependencies": {
+    "@opencode-ai/plugin": ">=1.0.0"
+  }
+}
