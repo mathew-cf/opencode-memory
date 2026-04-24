@@ -1,6 +1,6 @@
 {
   "name": "@mathew-cf/opencode-memory",
-  "version": "0.2.1",
+  "version": "0.3.0",
   "description": "Persistent cross-session memory for OpenCode — a hybrid keyword + semantic search layer over a local markdown knowledge base, plus session history tools and guardrails that nudge agents to use them.",
   "author": "mat",
   "license": "Apache-2.0",
