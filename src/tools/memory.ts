@@ -16,12 +16,16 @@ import {
 } from "../lib/frontmatter";
 import { normPath, ragIndexDir, resolveMemoryDir } from "../lib/paths";
 import {
-  ensureRag,
   installGuidance,
-  probeRag,
+  ragAvailable,
   ragSearch,
+  resolveRagBinary,
   spawnRagIndex,
 } from "../lib/rag";
+import {
+  resolveRgBinary,
+  rgInstallGuidance,
+} from "../lib/ripgrep";
 import {
   countTermMatches,
   parseSearchTerms,
@@ -136,10 +140,15 @@ export async function runSearch(input: {
   const terms = parseSearchTerms(query);
   const rgTerms = terms.length > 0 ? terms : [query];
 
-  const hasRag = await ensureRag();
+  const hasRag = ragAvailable();
+  const rgBin = resolveRgBinary();
 
   const [rgResult, ragResultText] = await Promise.all([
-    Bun.$`rg ${buildRgArgs(rgTerms)} ${searchDir}`.text().catch(() => ""),
+    rgBin
+      ? Bun.$`${rgBin} ${buildRgArgs(rgTerms)} ${searchDir}`
+          .text()
+          .catch(() => "")
+      : Promise.resolve(""),
     hasRag
       ? ragSearch({ query, indexDir, topK: 15 })
       : Promise.resolve(""),
@@ -175,9 +184,11 @@ export async function runSearch(input: {
   let crossCategoryFallback = false;
   if (resultMap.size === 0 && category) {
     crossCategoryFallback = true;
-    const globalRgText = await Bun.$`rg ${buildRgArgs(rgTerms)} ${memoryDir}`
-      .text()
-      .catch(() => "");
+    const globalRgText = rgBin
+      ? await Bun.$`${rgBin} ${buildRgArgs(rgTerms)} ${memoryDir}`
+          .text()
+          .catch(() => "")
+      : "";
     if (globalRgText.trim()) {
       for (const line of globalRgText.trim().split("\n")) {
         const rel = toRelPath(memoryDir, line);
@@ -547,24 +558,21 @@ export async function runSave(): Promise<string> {
     // re-indexing so at least semantic search stays fresh.
   }
 
-  const hasRag = await ensureRag();
-  if (hasRag) {
-    spawnRagIndex({ memoryDir, indexDir });
-  }
+  const kickedOffIndex = spawnRagIndex({ memoryDir, indexDir });
 
   if (changed.length === 0) {
     return "No changes to sync";
   }
 
   const result = `Synced: ${changed.join(", ")}`;
-  return hasRag ? result : `${result}\n\n${installGuidance()}`;
+  return kickedOffIndex ? result : `${result}\n\n${installGuidance()}`;
 }
 
 export const setup = tool({
   description:
-    "One-time setup helper: reports whether the `rag` binary and `cargo` are " +
-    "available, and prints installation guidance if semantic search isn't " +
-    "wired up yet. Safe to run at any time — does not modify anything.",
+    "Reports whether `@mathew-cf/rag-cli` is resolvable from this plugin's " +
+    "node_modules and prints installation guidance if not. Safe to run at " +
+    "any time — does not modify anything.",
   args: {},
   async execute() {
     return runSetup();
@@ -572,21 +580,27 @@ export const setup = tool({
 });
 
 export async function runSetup(): Promise<string> {
-  const status = await probeRag();
+  const ragShim = resolveRagBinary();
+  const rgBin = resolveRgBinary();
   const lines: string[] = [];
-  lines.push(
-    `rag binary: ${status.installed ? "installed" : "NOT installed"}`,
-  );
-  lines.push(
-    `cargo (Rust toolchain): ${status.cargoAvailable ? "installed" : "NOT installed"}`,
-  );
+  lines.push(`ripgrep (keyword search): ${rgBin ?? "NOT resolvable"}`);
+  lines.push(`rag shim (semantic search): ${ragShim ?? "NOT resolvable"}`);
   lines.push("");
-  if (status.installed) {
+
+  if (ragShim && rgBin) {
     lines.push(
-      "All set — semantic search is available. Run `rag download` to pre-cache the embedding model if you haven't already.",
+      "All set — both search backends are available. Run `rag download` " +
+        "once to pre-cache the embedding model if you haven't already " +
+        "(subsequent semantic searches are fast).",
     );
   } else {
-    lines.push(installGuidance());
+    if (!rgBin) {
+      lines.push(rgInstallGuidance());
+      lines.push("");
+    }
+    if (!ragShim) {
+      lines.push(installGuidance());
+    }
   }
   return lines.join("\n");
 }

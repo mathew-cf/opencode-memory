@@ -337,12 +337,27 @@ describe("runSave", () => {
 });
 
 describe("runSetup", () => {
-  test("returns a status report with install guidance when rag is missing", async () => {
+  test("reports status lines for both ripgrep and the rag shim", async () => {
     const out = await runSetup();
-    // Without knowing whether rag is installed on the test box, we just
-    // verify the output shape: both status lines are present.
-    expect(out).toContain("rag binary:");
-    expect(out).toContain("cargo (Rust toolchain):");
+    // We don't assume a particular install state — tests are run with
+    // both deps linked, but the output shape should be consistent even
+    // if one resolves and the other doesn't.
+    expect(out).toContain("ripgrep (keyword search):");
+    expect(out).toContain("rag shim (semantic search):");
+  });
+
+  test("reports 'All set' when both resolve, or guidance when one is missing", async () => {
+    const out = await runSetup();
+    const bothResolved = !out.includes("NOT resolvable");
+    if (bothResolved) {
+      expect(out).toContain("All set");
+    } else {
+      // At least one guidance message should appear.
+      const hasGuidance =
+        out.includes("Keyword search is unavailable") ||
+        out.includes("Semantic search is unavailable");
+      expect(hasGuidance).toBe(true);
+    }
   });
 });
 

@@ -274,16 +274,22 @@ Fix: document the target architecture as if it's already the design. If you must
 
 ---
 
-## Installation — Semantic Search
+## Installation — Search Backends
 
-Keyword search (via ripgrep) works out of the box. Semantic search needs the `rag` CLI:
+Both search backends ship as npm dependencies with prebuilt binaries:
+
+| Backend                | Package                 | Provides the `<bin>` |
+| ---------------------- | ----------------------- | -------------------- |
+| **Keyword (ripgrep)**  | `@vscode/ripgrep`       | `rg`                 |
+| **Semantic (rag-cli)** | `@mathew-cf/rag-cli`    | `rag`                |
+
+No manual install is needed — `npm install` (or whatever installs this plugin) pulls in both and resolves them via `require.resolve` at runtime. Nothing depends on `$PATH`.
+
+After install, run once to pre-cache the embedding model (optional but makes the first semantic search instant):
 
 ```bash
-# install (Rust toolchain required)
-cargo install rag-cli
-
-# pre-download the embedding model (optional, faster first search)
-rag download
+memory_setup   # reports which backends are resolvable
+rag download   # downloads the MiniLM-L6 weights (~90MB)
 ```
 
-If `rag` isn't available, the tools degrade gracefully to keyword-only ranking. Call `memory_setup` to check the current status and get an install URL.
+If a backend fails to install (unsupported platform, etc.), the tools degrade gracefully — `memory_search` still returns whatever the available backend can find. Call `memory_setup` any time to see install guidance for the missing piece.

@@ -23,7 +23,7 @@ LLM agents forget everything between sessions. That means rediscovering the same
 ```jsonc
 // opencode.jsonc
 {
-  "plugin": ["@mathew-cf/opencode-memory@0.1.0"]
+  "plugin": ["@mathew-cf/opencode-memory@0.2.0"]
 }
 ```
 
@@ -33,16 +33,24 @@ The plugin auto-registers:
 - edit + external-directory permissions for `~/opencode-memory/**`
 - memory-aware prompt prefixes on the five built-in subagents (only when their prompt isn't already set)
 
-### Optional: semantic search
+### Search backends
 
-Keyword search (ripgrep) works out of the box. For semantic search, install the `rag` CLI:
+`memory_search` combines two complementary signals:
+
+| Backend                | Package                     | Purpose                              |
+| ---------------------- | --------------------------- | ------------------------------------ |
+| **Keyword (ripgrep)**  | `@vscode/ripgrep`           | Exact-match + phrase lookup over files |
+| **Semantic (rag-cli)** | `@mathew-cf/rag-cli`        | Similarity search via local embeddings |
+
+Both are declared as **required dependencies**: installing the plugin pulls in prebuilt binaries for your platform automatically (macOS ARM64/x64, Linux x64/ARM64; ripgrep additionally covers Windows and FreeBSD). No Rust toolchain, no `brew install`, no `$PATH` plumbing.
+
+Pre-cache the embedding model once (~90MB) to make the first semantic search instant:
 
 ```bash
-cargo install rag-cli
-rag download     # pre-cache the embedding model (~90MB, optional)
+rag download
 ```
 
-Without `rag`, the tools keep working — they just fall back to keyword-only ranking. Run `memory_setup` at any time to check status and see install guidance.
+If either dependency fails to install (unusual — usually indicates an unsupported platform), the plugin transparently degrades. `memory_setup` reports which backends are resolvable and prints targeted install guidance for each.
 
 ## Usage
 
