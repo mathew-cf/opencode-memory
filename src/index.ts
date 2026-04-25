@@ -70,7 +70,21 @@ const MemoryPlugin: Plugin = async () => {
   };
 };
 
-export default MemoryPlugin;
+/**
+ * Default export uses the V1 plugin format — a record with `id` + `server`.
+ *
+ * OpenCode's plugin loader first tries V1 (`readV1Plugin`): if `default` is
+ * a record with `id`/`server`/`tui`, it uses only those. Otherwise it falls
+ * back to "legacy" detection which iterates EVERY named export and requires
+ * each to be a function — so a single non-function re-export (e.g. the
+ * `MEMORY_PROMPT_APPENDIX` string below) would abort plugin load with a
+ * TypeError. Shipping V1 keeps the named helper re-exports safe because the
+ * loader never iterates them.
+ */
+export default {
+  id: "opencode-memory",
+  server: MemoryPlugin,
+};
 
 // Re-exports for power users who want to wire pieces into their own plugin.
 export { applyConfig, MEMORY_PROMPT_APPENDIX, TARGET_AGENTS } from "./config";
