@@ -1,8 +1,8 @@
 # @mathew-cf/opencode-memory
 
-Persistent cross-session memory for [OpenCode](https://opencode.ai).
+Persistent cross-session memory for [OpenCode](https://opencode.ai), [Zed](https://zed.dev), [Pi](https://github.com/earendil-works/pi), and any other host that speaks the Model Context Protocol.
 
-This plugin gives the agent a durable knowledge base rooted at `~/opencode-memory/` — a git-tracked tree of markdown notes — plus read access to its own past sessions. A hybrid keyword + semantic search layer surfaces relevant notes before work starts, and a guard hook nudges the agent to save reusable discoveries as it goes.
+The core surface is a durable knowledge base rooted at `~/opencode-memory/` — a git-tracked tree of markdown notes — paired with a hybrid keyword + semantic search layer. OpenCode gets the full plugin (tools + hooks + auto-applied config); every other host gets the same five tools as an MCP server, plus the bundled skill via the standard `~/.agents/skills/` discovery path.
 
 ## Why
 
@@ -13,12 +13,15 @@ LLM agents forget everything between sessions. That means rediscovering the same
 | Category           | Additions                                                                 |
 | ------------------ | ------------------------------------------------------------------------- |
 | **Memory tools**   | `memory_search`, `memory_list`, `memory_save`, `memory_access`, `memory_setup` |
-| **Session tools**  | `session_search`, `session_read`, `session_list`                          |
-| **Hooks**          | Search-first nudge at 8 tool calls; discovery nudge on subagent outputs; retrospective reminder at compaction time |
-| **Skill**          | `opencode-memory` (auto-registered via the `skills.paths` config)         |
-| **Agent prompts**  | Built-in subagents (`general`, `explore`, `research`, `review`, `investigator`) get a memory-aware prompt prepended non-destructively |
+| **Session tools**  | `session_search`, `session_read`, `session_list` (OpenCode only — read OpenCode's SQLite history) |
+| **MCP server**     | `opencode-memory-mcp` — stdio server exposing the five memory tools to any MCP host (Zed, Pi, Claude Code, Cursor, …) |
+| **Hooks**          | Search-first nudge at 8 tool calls; discovery nudge on subagent outputs; retrospective reminder at compaction time (OpenCode only) |
+| **Skill**          | `opencode-memory` — auto-registered in OpenCode, dropped at `~/.agents/skills/opencode-memory` for Zed & Pi |
+| **Agent prompts**  | Built-in subagents (`general`, `explore`, `research`, `review`, `investigator`) get a memory-aware prompt prepended non-destructively (OpenCode only) |
 
 ## Installation
+
+### OpenCode
 
 ```jsonc
 // opencode.jsonc
@@ -27,19 +30,66 @@ LLM agents forget everything between sessions. That means rediscovering the same
 }
 ```
 
-Then bootstrap the memory directory + embedding model:
+Then bootstrap the memory directory + embedding model + skill:
 
 ```bash
 bunx @mathew-cf/opencode-memory init
 ```
 
-This creates `~/opencode-memory/` (git repo, 7 category subdirs) and downloads the ~90MB embedding model. Idempotent — safe to re-run. Pass `--skip-model` to defer the download.
+This creates `~/opencode-memory/` (git repo, 7 category subdirs), downloads the ~90MB embedding model, and symlinks the bundled skill into `~/.agents/skills/opencode-memory` (where Zed and Pi look). Idempotent — safe to re-run. Pass `--skip-model` to defer the download, `--skip-skills` to skip the symlink.
 
-The plugin auto-registers:
+The plugin also auto-registers (OpenCode only):
 
 - its bundled skill under `config.skills.paths`
 - edit + external-directory permissions for `~/opencode-memory/**`
 - memory-aware prompt prefixes on the five built-in subagents (only when their prompt isn't already set)
+
+### Zed
+
+Zed's native agent panel speaks MCP via the top-level `context_servers` key, and auto-discovers SKILL.md files at `~/.agents/skills/` ([source](https://github.com/zed-industries/zed/blob/main/crates/agent_skills/agent_skills.rs)).
+
+```jsonc
+// ~/.config/zed/settings.json
+{
+  "context_servers": {
+    "opencode-memory": {
+      "command": "/Users/you/.bun/bin/bunx",
+      "args": ["@mathew-cf/opencode-memory@latest", "opencode-memory-mcp"],
+      "env": {}
+    }
+  }
+}
+```
+
+Use an absolute path to `bunx` — Zed launched from the macOS Dock has no `$PATH`. Run `bunx @mathew-cf/opencode-memory init` once first to bootstrap the memory dir and drop the skill symlink. Zed picks up both on next launch (agent panel → settings → green dot on `opencode-memory`).
+
+### Pi (`@earendil-works/pi-coding-agent`)
+
+Pi auto-discovers SKILL.md from `~/.agents/skills/` and `~/.pi/agent/skills/` ([source](https://github.com/earendil-works/pi/blob/main/packages/coding-agent/docs/skills.md)) and consumes MCP servers via [`pi-mcp-adapter`](https://www.npmjs.com/package/pi-mcp-adapter).
+
+```bash
+# One-time setup
+bunx @mathew-cf/opencode-memory init        # mem dir + skill symlink
+pi install npm:pi-mcp-adapter               # MCP support
+```
+
+```jsonc
+// ~/.pi/settings.json
+{
+  "mcpServers": {
+    "opencode-memory": {
+      "command": "bunx",
+      "args": ["@mathew-cf/opencode-memory@latest", "opencode-memory-mcp"]
+    }
+  }
+}
+```
+
+### Any other MCP host
+
+The `opencode-memory-mcp` bin speaks MCP v1 over stdio. Wire it in however your host configures MCP servers — `command: bunx`, `args: ["@mathew-cf/opencode-memory@latest", "opencode-memory-mcp"]`. Tested with Zed and Pi; should work with Claude Code, Cursor, Continue, etc.
+
+> **Note:** the MCP server exposes only the five `memory_*` tools. Session tools (`session_search`, `session_read`, `session_list`) are OpenCode-only — they read OpenCode's SQLite session DB, which other hosts don't share.
 
 ### Search backends
 

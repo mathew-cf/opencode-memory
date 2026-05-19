@@ -6,7 +6,7 @@
  * lazily so tests can override it with `$OPENCODE_DB`.
  */
 
-import { tool } from "@opencode-ai/plugin";
+import { tool, type ToolDefinition } from "@opencode-ai/plugin";
 import { querySqlite, resolveDbPath, sqlStr } from "../lib/db";
 
 // --- SQL builders (exported for tests) ---------------------------------
@@ -55,7 +55,7 @@ export interface SessionListRow {
 
 // --- Tools -------------------------------------------------------------
 
-export const search = tool({
+export const search: ToolDefinition = tool({
   description:
     "Search previous OpenCode sessions by keyword. Searches both session titles and message content. " +
     "Multi-term queries match sessions containing ANY search term (OR logic); sessions matching more " +
@@ -223,7 +223,7 @@ export async function runSessionSearch(input: {
   return lines.join("\n");
 }
 
-export const list = tool({
+export const list: ToolDefinition = tool({
   description:
     "List OpenCode sessions ordered by most-recently-updated, optionally filtered by time range " +
     "and/or project directory. Useful for browsing recent work or finding sessions from a specific period.",
@@ -323,7 +323,7 @@ export async function runSessionList(input: {
   return `Found ${rows.length} session(s):\n\n${lines.join("\n\n")}`;
 }
 
-export const read = tool({
+export const read: ToolDefinition = tool({
   description:
     "Read the text content of a previous OpenCode session in order. Returns user and assistant text " +
     "messages. Use offset and limit to page through long sessions — session_search returns a " +

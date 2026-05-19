@@ -8,15 +8,32 @@
  */
 
 import { describe, expect, test } from "bun:test";
-import { existsSync } from "node:fs";
+import { existsSync, lstatSync, readlinkSync, writeFileSync } from "node:fs";
+import { mkdir } from "node:fs/promises";
 import {
   dispatch,
   initMemory,
+  installSkill,
   parseInitFlags,
+  resolveBundledSkillsDir,
   usage,
 } from "../src/cli";
 import { CATEGORIES } from "../src/constants";
-import { withMemoryDir } from "./helpers";
+import { makeTempDir, withMemoryDir } from "./helpers";
+
+/**
+ * Helper: every `initMemory` call in this file must point the skill
+ * install at a temp dir so we never touch `~/.agents/skills/` from CI.
+ * Returns a fresh temp dir plus its options bag; the caller owns
+ * cleanup.
+ */
+function withSkillLinkDir(extra: Record<string, unknown> = {}) {
+  const tmp = makeTempDir("opencode-memory-skill-link-");
+  return {
+    tmp,
+    options: { ...extra, skillLinkDir: tmp.path },
+  };
+}
 
 describe("parseInitFlags", () => {
   test("returns empty options for no flags", () => {
@@ -33,9 +50,14 @@ describe("parseInitFlags", () => {
     expect(parseInitFlags(["-q"])).toEqual({ quiet: true });
   });
 
+  test("recognises --skip-skills", () => {
+    expect(parseInitFlags(["--skip-skills"])).toEqual({ skipSkills: true });
+  });
+
   test("combines flags", () => {
-    expect(parseInitFlags(["--skip-model", "--quiet"])).toEqual({
+    expect(parseInitFlags(["--skip-model", "--skip-skills", "--quiet"])).toEqual({
       skipModel: true,
+      skipSkills: true,
       quiet: true,
     });
   });
@@ -58,62 +80,191 @@ describe("usage", () => {
 describe("initMemory", () => {
   test("creates the memory directory and category subdirs from a clean slate", async () => {
     await withMemoryDir(async (dir) => {
-      const result = await initMemory(dir, { skipModel: true, quiet: true });
-      expect(result.memoryDir).toBe(dir);
-      expect(result.gitInitialized).toBe(true);
-      expect(result.createdCategories.sort()).toEqual([...CATEGORIES].sort());
-      expect(result.modelDownloadAttempted).toBe(false);
+      const { tmp, options } = withSkillLinkDir({
+        skipModel: true,
+        quiet: true,
+      });
+      try {
+        const result = await initMemory(dir, options);
+        expect(result.memoryDir).toBe(dir);
+        expect(result.gitInitialized).toBe(true);
+        expect(result.createdCategories.sort()).toEqual([...CATEGORIES].sort());
+        expect(result.modelDownloadAttempted).toBe(false);
 
-      // Every category exists with a .gitkeep
-      for (const cat of CATEGORIES) {
-        expect(existsSync(`${dir}/${cat}`)).toBe(true);
-        expect(existsSync(`${dir}/${cat}/.gitkeep`)).toBe(true);
+        // Every category exists with a .gitkeep
+        for (const cat of CATEGORIES) {
+          expect(existsSync(`${dir}/${cat}`)).toBe(true);
+          expect(existsSync(`${dir}/${cat}/.gitkeep`)).toBe(true);
+        }
+        expect(existsSync(`${dir}/.git`)).toBe(true);
+      } finally {
+        tmp.cleanup();
       }
-      expect(existsSync(`${dir}/.git`)).toBe(true);
     });
   });
 
   test("is idempotent — second run reports nothing new", async () => {
     await withMemoryDir(async (dir) => {
-      await initMemory(dir, { skipModel: true, quiet: true });
-      const second = await initMemory(dir, { skipModel: true, quiet: true });
-      expect(second.gitInitialized).toBe(false);
-      expect(second.createdCategories).toEqual([]);
+      const { tmp, options } = withSkillLinkDir({
+        skipModel: true,
+        quiet: true,
+      });
+      try {
+        await initMemory(dir, options);
+        const second = await initMemory(dir, options);
+        expect(second.gitInitialized).toBe(false);
+        expect(second.createdCategories).toEqual([]);
+        // Skill install reports "already-installed" on the second run.
+        expect(second.skillInstall?.status).toBe("already-installed");
+      } finally {
+        tmp.cleanup();
+      }
     });
   });
 
   test("only reports newly-created categories on partial init", async () => {
     await withMemoryDir(async (dir) => {
-      // Pre-create one category by hand to simulate a partially-initialized
-      // memory dir (e.g., the user ran init once, then deleted some dirs).
-      await Bun.$`mkdir -p ${dir}/notes`.quiet();
-      const result = await initMemory(dir, { skipModel: true, quiet: true });
-      expect(result.createdCategories).not.toContain("notes");
-      expect(result.createdCategories).toContain("technical");
+      const { tmp, options } = withSkillLinkDir({
+        skipModel: true,
+        quiet: true,
+      });
+      try {
+        // Pre-create one category by hand to simulate a partially-initialized
+        // memory dir (e.g., the user ran init once, then deleted some dirs).
+        await Bun.$`mkdir -p ${dir}/notes`.quiet();
+        const result = await initMemory(dir, options);
+        expect(result.createdCategories).not.toContain("notes");
+        expect(result.createdCategories).toContain("technical");
+      } finally {
+        tmp.cleanup();
+      }
     });
   });
 
   test("collects log lines passed via the log callback", async () => {
     await withMemoryDir(async (dir) => {
-      const lines: string[] = [];
-      await initMemory(dir, { skipModel: true }, (m) => lines.push(m));
-      const joined = lines.join("\n");
-      expect(joined).toContain(`Memory dir: ${dir}`);
-      expect(joined).toMatch(/git repo/);
-      expect(joined).toMatch(/category dirs/);
+      const { tmp, options } = withSkillLinkDir({ skipModel: true });
+      try {
+        const lines: string[] = [];
+        await initMemory(dir, options, (m) => lines.push(m));
+        const joined = lines.join("\n");
+        expect(joined).toContain(`Memory dir: ${dir}`);
+        expect(joined).toMatch(/git repo/);
+        expect(joined).toMatch(/category dirs/);
+        // Skill install line is emitted by default.
+        expect(joined).toMatch(/skill/);
+      } finally {
+        tmp.cleanup();
+      }
     });
   });
 
   test("--quiet suppresses the log callback", async () => {
     await withMemoryDir(async (dir) => {
-      const lines: string[] = [];
-      await initMemory(
-        dir,
-        { skipModel: true, quiet: true },
-        (m) => lines.push(m),
-      );
-      expect(lines).toEqual([]);
+      const { tmp, options } = withSkillLinkDir({
+        skipModel: true,
+        quiet: true,
+      });
+      try {
+        const lines: string[] = [];
+        await initMemory(dir, options, (m) => lines.push(m));
+        expect(lines).toEqual([]);
+      } finally {
+        tmp.cleanup();
+      }
     });
+  });
+
+  test("--skip-skills suppresses skill install entirely", async () => {
+    await withMemoryDir(async (dir) => {
+      const { tmp, options } = withSkillLinkDir({
+        skipModel: true,
+        skipSkills: true,
+        quiet: true,
+      });
+      try {
+        const result = await initMemory(dir, options);
+        expect(result.skillInstall).toBeNull();
+      } finally {
+        tmp.cleanup();
+      }
+    });
+  });
+});
+
+describe("installSkill", () => {
+  test("symlinks the bundled skill on a fresh target", async () => {
+    const tmp = makeTempDir("opencode-memory-skill-link-");
+    try {
+      const result = await installSkill({
+        bundledSkillsDir: resolveBundledSkillsDir(),
+        linkDir: tmp.path,
+      });
+      expect(result.status).toBe("created");
+      expect(existsSync(result.linkPath)).toBe(true);
+      // It's actually a symlink (not a copy).
+      expect(lstatSync(result.linkPath).isSymbolicLink()).toBe(true);
+      // ...pointing where we said it would.
+      const linkTarget = readlinkSync(result.linkPath);
+      expect(linkTarget).toBe(result.targetPath);
+    } finally {
+      tmp.cleanup();
+    }
+  });
+
+  test("is idempotent — second call reports already-installed", async () => {
+    const tmp = makeTempDir("opencode-memory-skill-link-");
+    try {
+      const first = await installSkill({
+        bundledSkillsDir: resolveBundledSkillsDir(),
+        linkDir: tmp.path,
+      });
+      expect(first.status).toBe("created");
+      const second = await installSkill({
+        bundledSkillsDir: resolveBundledSkillsDir(),
+        linkDir: tmp.path,
+      });
+      expect(second.status).toBe("already-installed");
+    } finally {
+      tmp.cleanup();
+    }
+  });
+
+  test("leaves unrelated existing content untouched", async () => {
+    const tmp = makeTempDir("opencode-memory-skill-link-");
+    try {
+      // Pre-place a regular file at the link path — the install must
+      // refuse to overwrite it.
+      await mkdir(tmp.path, { recursive: true });
+      writeFileSync(`${tmp.path}/opencode-memory`, "do not clobber\n");
+
+      const result = await installSkill({
+        bundledSkillsDir: resolveBundledSkillsDir(),
+        linkDir: tmp.path,
+      });
+      expect(result.status).toBe("skipped-existing");
+      // Original file content survives.
+      expect(existsSync(`${tmp.path}/opencode-memory`)).toBe(true);
+      expect(lstatSync(`${tmp.path}/opencode-memory`).isSymbolicLink()).toBe(
+        false,
+      );
+    } finally {
+      tmp.cleanup();
+    }
+  });
+
+  test("reports unavailable when the bundled skill dir is missing", async () => {
+    const tmp = makeTempDir("opencode-memory-skill-link-");
+    try {
+      const result = await installSkill({
+        bundledSkillsDir: "/definitely/does/not/exist",
+        linkDir: tmp.path,
+      });
+      expect(result.status).toBe("unavailable");
+      expect(existsSync(`${tmp.path}/opencode-memory`)).toBe(false);
+    } finally {
+      tmp.cleanup();
+    }
   });
 });
 
@@ -131,7 +282,14 @@ describe("dispatch", () => {
 
   test("init runs end-to-end against a temp dir", async () => {
     await withMemoryDir(async (dir) => {
-      const code = await dispatch(["init", "--skip-model", "--quiet"]);
+      // `dispatch` doesn't accept `skillLinkDir` — pass --skip-skills
+      // so the run doesn't try to write into ~/.agents/skills/.
+      const code = await dispatch([
+        "init",
+        "--skip-model",
+        "--skip-skills",
+        "--quiet",
+      ]);
       expect(code).toBe(0);
       expect(existsSync(`${dir}/.git`)).toBe(true);
       for (const cat of CATEGORIES) {

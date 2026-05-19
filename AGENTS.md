@@ -20,7 +20,9 @@ bun run typecheck && bun test && bun run build
 
 ```
 src/
-  index.ts              # Plugin entry — wires tools, hooks, config
+  index.ts              # OpenCode plugin entry — wires tools, hooks, config
+  cli.ts                # `opencode-memory` bin: init / status / help
+  mcp.ts                # `opencode-memory-mcp` bin: MCP stdio server for Zed/Pi/etc.
   config.ts             # applyConfig() — skills.paths, agent prompts, permissions
   constants.ts          # CATEGORIES, DEFAULT_MEMORY_SUBDIR, STOP_WORDS
   lib/
@@ -43,6 +45,8 @@ test/
   session.test.ts       # Integration tests against a temp SQLite db
   guard.test.ts         # Hook state machine + compaction output
   config.test.ts        # applyConfig() additive behaviour
+  cli.test.ts           # CLI dispatcher + skill-symlink install
+  mcp.test.ts           # MCP server: tool surface + in-memory client smoke
 skills/
   opencode-memory/
     SKILL.md            # The bundled skill, auto-registered at plugin load
@@ -52,7 +56,17 @@ scripts/
 
 ## Architecture
 
-### Plugin entry (`src/index.ts`)
+This package ships three independent surfaces against the same shared core:
+
+| Surface              | Entry point      | Audience                                  |
+| -------------------- | ---------------- | ----------------------------------------- |
+| OpenCode plugin      | `src/index.ts`   | OpenCode (tools + hooks + auto-config)    |
+| `opencode-memory`    | `src/cli.ts`     | Humans (`init`, `status`) + post-install  |
+| `opencode-memory-mcp` | `src/mcp.ts`    | Any MCP host — Zed, Pi, Claude Code, etc. |
+
+All three share `src/tools/memory.ts` and `src/lib/*`. Adding a new memory tool means changing `tools/memory.ts` and registering it in **two** entry points (the OpenCode plugin tool map in `index.ts`, and the MCP server in `mcp.ts`).
+
+### OpenCode plugin entry (`src/index.ts`)
 
 Exports a default `Plugin` function. On load it returns:
 
@@ -60,6 +74,19 @@ Exports a default `Plugin` function. On load it returns:
 - **`config`** — calls `applyConfig()` to register the bundled skill directory, add edit/external_directory permissions for `~/opencode-memory/**`, and prepend the memory-awareness appendix to the built-in subagent prompts
 - **`tool.execute.after`** — `guard.toolAfter`, tracks memory/session tool usage, fires nudges
 - **`experimental.session.compacting`** — `guard.compacting`, injects preserve-through-compaction context
+
+### MCP server entry (`src/mcp.ts`)
+
+Exports `createMcpServer()` (pure factory, used by tests) and `runMcpServer()` (connects stdio and blocks). Direct invocation guard at the bottom fires when run as the `opencode-memory-mcp` bin.
+
+Exposes only the five `memory_*` tools — session tools (`session_search`, etc.) are intentionally not registered because they read OpenCode's SQLite schema and would mislead non-OpenCode hosts about what data is available.
+
+Two notable workarounds:
+
+1. **`registerTool` generic-explosion**: `McpServer.registerTool`'s dual `OutputArgs`/`InputArgs` generics trigger TS2589 ("Type instantiation is excessively deep") when more than ~2 tools accumulate on the same server. The `register()` local helper pins the callback type via `(server.registerTool as any)(...)` to break the inference chain.
+2. **`packageVersion()`** reads `package.json` at runtime via `require("node:fs")`. The bundled dist sits at `dist/mcp.js` with the original `package.json` one directory up — the same layout as src/ during dev, so the `..` traversal works in both cases.
+
+stdout is reserved for JSON-RPC frames. Every `runXxx` function returns strings (no direct stdout writes) and `spawnRagIndex` runs detached with `stdout: "ignore"`, so this invariant holds end-to-end.
 
 ### Separation of concerns
 
@@ -99,10 +126,11 @@ The `rag` CLI is optional. `ensureRag()` silently tries a `cargo install` fallba
 
 1. Add a file (or new exports) under `src/tools/`.
 2. Write the pure `runXxx(input)` function first. It should be callable from a test with plain arguments and return a string.
-3. Wrap it with `tool({ description, args, execute })`. Keep the description opinionated — tell the agent when to call it and what to look for in the output.
-4. Re-export it from `src/index.ts` under the appropriate namespace (`memory_xxx` or `session_xxx`).
-5. Write tests for both the pure helpers **and** the integration path.
-6. If the tool needs a new permission or a new agent prompt, update `src/config.ts` and `test/config.test.ts`.
+3. Wrap it with `tool({ description, args, execute })` for the OpenCode plugin surface. Keep the description opinionated — tell the agent when to call it and what to look for in the output. Annotate the export with `ToolDefinition` (otherwise TypeScript can't name the inferred type due to zod-v3-vs-v4 drift in transitive deps).
+4. Register it in `src/index.ts` under the appropriate namespace (`memory_xxx` or `session_xxx`).
+5. If it's a memory tool (not a session tool), also register it in `src/mcp.ts` via `register(server, "name", { ... }, async (args) => ...)`. Keep the description in sync with the OpenCode-side prompt — both surface the same guidance to LLMs.
+6. Write tests for both the pure helpers **and** the integration path. The MCP server is covered by an in-memory client smoke test in `test/mcp.test.ts`.
+7. If the tool needs a new permission or a new agent prompt, update `src/config.ts` and `test/config.test.ts`.
 
 ## Publishing
 

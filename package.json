@@ -12,14 +12,15 @@
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "bin": {
-    "opencode-memory": "dist/cli.js"
+    "opencode-memory": "dist/cli.js",
+    "opencode-memory-mcp": "dist/mcp.js"
   },
   "files": [
     "dist",
     "skills"
   ],
   "scripts": {
-    "build": "bun build src/index.ts src/cli.ts --outdir dist --target node && tsc --emitDeclarationOnly",
+    "build": "bun build src/index.ts src/cli.ts src/mcp.ts --outdir dist --target node && tsc --emitDeclarationOnly",
     "test": "bun test",
     "prepublishOnly": "bun run build",
     "typecheck": "tsc --noEmit",
@@ -32,11 +33,17 @@
     "memory",
     "rag",
     "semantic-search",
-    "persistence"
+    "persistence",
+    "mcp",
+    "model-context-protocol",
+    "zed",
+    "pi"
   ],
   "dependencies": {
     "@mathew-cf/rag-cli": "^0.4.0",
-    "@vscode/ripgrep": "^1.17.1"
+    "@modelcontextprotocol/sdk": "^1.29.0",
+    "@vscode/ripgrep": "^1.17.1",
+    "zod": "^3.25.0"
   },
   "devDependencies": {
     "@opencode-ai/plugin": "^1.1.49",

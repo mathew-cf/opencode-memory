@@ -96,5 +96,6 @@ export {
   matchesToolName,
   type SessionState,
 } from "./hooks/guard";
+export { createMcpServer, runMcpServer } from "./mcp";
 export * as memoryTools from "./tools/memory";
 export * as sessionTools from "./tools/session";

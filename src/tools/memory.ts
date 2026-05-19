@@ -6,7 +6,7 @@
  * `$MEMORY_DIR` before importing.
  */
 
-import { tool } from "@opencode-ai/plugin";
+import { tool, type ToolDefinition } from "@opencode-ai/plugin";
 import { CATEGORIES } from "../constants";
 import {
   bumpAccessFields,
@@ -90,7 +90,7 @@ export function toRelPath(memoryDir: string, absPath: string): string {
 
 // --- Tools --------------------------------------------------------------
 
-export const search = tool({
+export const search: ToolDefinition = tool({
   description:
     "Search memories in ~/opencode-memory/ using both keyword (rg) and semantic (rag) search. " +
     "Results are summaries only (path, tags, importance, short context). " +
@@ -373,7 +373,7 @@ export async function runSearch(input: {
   return lines.join("\n");
 }
 
-export const list = tool({
+export const list: ToolDefinition = tool({
   description:
     "Browse memories in ~/opencode-memory/. Without a category, lists all categories with file counts. " +
     "With a category, lists files in that category with their summaries.",
@@ -460,7 +460,7 @@ export async function runList(input: { category?: string }): Promise<string> {
   return lines.join("\n");
 }
 
-export const access = tool({
+export const access: ToolDefinition = tool({
   description:
     "Record that a memory file was accessed (read and used). Updates last_accessed date " +
     "and increments access_count in frontmatter. Call this AFTER reading a memory file " +
@@ -499,7 +499,7 @@ export async function runAccess(input: { path: string }): Promise<string> {
   }
 }
 
-export const save = tool({
+export const save: ToolDefinition = tool({
   description:
     "Commit and re-index all pending memory changes. " +
     "Call AFTER using Write/Edit tools on ~/opencode-memory/{category}/{filename}.md. " +
@@ -568,7 +568,7 @@ export async function runSave(): Promise<string> {
   return kickedOffIndex ? result : `${result}\n\n${installGuidance()}`;
 }
 
-export const setup = tool({
+export const setup: ToolDefinition = tool({
   description:
     "Reports whether `@mathew-cf/rag-cli` is resolvable from this plugin's " +
     "node_modules and prints installation guidance if not. Safe to run at " +
