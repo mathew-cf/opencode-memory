@@ -46,19 +46,47 @@ async function makeHarness(): Promise<Harness> {
   };
 }
 
+describe("plugin entry isolation", () => {
+  // Regression: a previous version of src/index.ts had
+  //   export { createMcpServer, runMcpServer } from "./mcp";
+  // which bundled the entire MCP SDK + zod into the plugin entry. Worse,
+  // mcp.ts's top-level `isDirect` check (which used import.meta.main) got
+  // transpiled by Bun's --target node bundler into an expression that
+  // evaluates to `true` under dynamic import — so importing dist/index.js
+  // auto-started the MCP stdio server inside the host process and stole
+  // keystrokes from OpenCode's TUI.
+  //
+  // Guard against re-introducing the re-export. mcp.ts must only be
+  // reachable via a deliberate subpath import (or the standalone bin).
+  test("src/index.ts does not re-export MCP server helpers", async () => {
+    const mod = await import("../src/index");
+    expect("createMcpServer" in mod).toBe(false);
+    expect("runMcpServer" in mod).toBe(false);
+  });
+
+  test("importing src/mcp.ts does not attach stdin listeners", async () => {
+    const before = process.stdin.listenerCount("data");
+    await import("../src/mcp");
+    // Yield once so any deferred top-level work runs.
+    await new Promise((r) => setImmediate(r));
+    const after = process.stdin.listenerCount("data");
+    expect(after).toBe(before);
+  });
+});
+
 describe("MCP server", () => {
   let tmp: TempDir;
   let prevMemoryDir: string | undefined;
 
   beforeEach(() => {
     tmp = makeTempDir("opencode-memory-mcp-");
-    prevMemoryDir = process.env.MEMORY_DIR;
-    process.env.MEMORY_DIR = tmp.path;
+    prevMemoryDir = process.env.OPENCODE_MEMORY_DIR;
+    process.env.OPENCODE_MEMORY_DIR = tmp.path;
   });
 
   afterEach(() => {
-    if (prevMemoryDir === undefined) delete process.env.MEMORY_DIR;
-    else process.env.MEMORY_DIR = prevMemoryDir;
+    if (prevMemoryDir === undefined) delete process.env.OPENCODE_MEMORY_DIR;
+    else process.env.OPENCODE_MEMORY_DIR = prevMemoryDir;
     tmp.cleanup();
   });
 

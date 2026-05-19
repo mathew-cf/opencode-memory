@@ -17,6 +17,8 @@
  * other variant. That gives us one hook file that's robust to renames.
  */
 
+import { formatMemoryDirForDisplay, resolveMemoryDir } from "../lib/paths";
+
 export interface SessionState {
   toolCalls: number;
   memorySearched: boolean;
@@ -45,10 +47,7 @@ export function makeInitialState(): SessionState {
  * tools. Accepts both bare names (`memory_search`) and namespaced variants
  * (`opencode-memory.memory_search` or similar). Exported for tests.
  */
-export function matchesToolName(
-  toolName: string,
-  candidates: string[],
-): boolean {
+export function matchesToolName(toolName: string, candidates: string[]): boolean {
   const lower = toolName.toLowerCase();
   return candidates.some((c) => lower === c || lower.endsWith(`_${c}`) || lower.endsWith(`.${c}`));
 }
@@ -61,9 +60,17 @@ export function matchesToolName(
  * can reason about the nudge timing without plumbing through a full plugin
  * context.
  */
+function configuredMemoryDirLabel(memoryDir?: string): string {
+  try {
+    return formatMemoryDirForDisplay(memoryDir ?? resolveMemoryDir());
+  } catch {
+    return "the configured memory directory";
+  }
+}
+
 export function afterToolUpdate(
   state: SessionState,
-  input: { tool: string; output: string },
+  input: { tool: string; output: string; memoryDir?: string },
 ): string | null {
   state.toolCalls++;
 
@@ -77,11 +84,7 @@ export function afterToolUpdate(
   // --- Nudge: search first ---
   // After 8 tool calls without at least one of memory_search / session_search,
   // append a single reminder. Firing only once prevents spam.
-  if (
-    !state.searchNudged &&
-    state.toolCalls >= 8 &&
-    (!state.memorySearched || !state.sessionSearched)
-  ) {
+  if (!state.searchNudged && state.toolCalls >= 8 && (!state.memorySearched || !state.sessionSearched)) {
     state.searchNudged = true;
     const missing: string[] = [];
     if (!state.memorySearched) missing.push("memory_search");
@@ -105,10 +108,11 @@ export function afterToolUpdate(
     input.output.includes("Discoveries worth saving")
   ) {
     state.discoveryNudged = true;
+    const memoryRoot = configuredMemoryDirLabel(input.memoryDir);
     return (
       `<system-reminder>` +
       `The subagent reported "Discoveries worth saving" above. ` +
-      `Per protocol, you MUST save these to ~/opencode-memory/ now — ` +
+      `Per protocol, you MUST save these to ${memoryRoot} now — ` +
       `don't defer to session end. Write the file, then call memory_save.` +
       `</system-reminder>`
     );
@@ -184,10 +188,7 @@ export function createGuardHooks() {
         output.output = (output.output || "") + `\n\n${reminder}`;
       }
     },
-    compacting: async (
-      input: { sessionID: string },
-      output: { context: string[]; prompt?: string },
-    ) => {
+    compacting: async (input: { sessionID: string }, output: { context: string[]; prompt?: string }) => {
       const sid = input.sessionID || "_default";
       const state = getState(sid);
       output.context.push(buildCompactionContext(state));

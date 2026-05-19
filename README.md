@@ -118,7 +118,7 @@ If either dependency fails to install (unusual — usually indicates an unsuppor
 bunx @mathew-cf/opencode-memory init
 ```
 
-Creates `~/opencode-memory/` (or `$MEMORY_DIR`), runs `git init`, scaffolds the 7 advisory category subdirs (`preferences/`, `repos/`, `technical/`, `people/`, `workflows/`, `snippets/`, `notes/`), and pre-caches the embedding model for semantic search.
+Creates `~/opencode-memory/` (or `$OPENCODE_MEMORY_DIR`), runs `git init`, scaffolds the 7 advisory category subdirs (`preferences/`, `repos/`, `technical/`, `people/`, `workflows/`, `snippets/`, `notes/`), and pre-caches the embedding model for semantic search.
 
 Subcommands:
 

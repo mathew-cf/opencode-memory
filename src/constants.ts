@@ -24,7 +24,8 @@ export type Category = (typeof CATEGORIES)[number];
 
 /**
  * Default directory, relative to the user's home, where memory files live.
- * The `MEMORY_DIR` env var overrides this (primarily for tests).
+ * The `OPENCODE_MEMORY_DIR` env var overrides this (primarily for tests
+ * and for users who keep their knowledge base in a non-default location).
  */
 export const DEFAULT_MEMORY_SUBDIR = "opencode-memory";
 

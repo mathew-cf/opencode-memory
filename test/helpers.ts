@@ -2,9 +2,9 @@
  * Shared test utilities.
  *
  * These helpers set up isolated temp directories per test and ensure
- * cleanup always runs. Tests use `MEMORY_DIR` and `OPENCODE_DB` env-var
- * overrides rather than mutating process globals because the tools read
- * the env lazily and restart fresh on every call.
+ * cleanup always runs. Tests use `OPENCODE_MEMORY_DIR` and `OPENCODE_DB`
+ * env-var overrides rather than mutating process globals because the
+ * tools read the env lazily and restart fresh on every call.
  */
 
 import { mkdtempSync, rmSync } from "node:fs";
@@ -31,21 +31,21 @@ export function makeTempDir(prefix = "opencode-memory-test-"): TempDir {
 }
 
 /**
- * Run a function with a fresh temp memory dir and the MEMORY_DIR env var
- * pointed at it. The previous env value is restored after the callback
- * so tests don't leak state.
+ * Run a function with a fresh temp memory dir and the
+ * OPENCODE_MEMORY_DIR env var pointed at it. The previous env value is
+ * restored after the callback so tests don't leak state.
  */
 export async function withMemoryDir<T>(
   fn: (dir: string) => Promise<T>,
 ): Promise<T> {
   const tmp = makeTempDir();
-  const prev = process.env.MEMORY_DIR;
-  process.env.MEMORY_DIR = tmp.path;
+  const prev = process.env.OPENCODE_MEMORY_DIR;
+  process.env.OPENCODE_MEMORY_DIR = tmp.path;
   try {
     return await fn(tmp.path);
   } finally {
-    if (prev === undefined) delete process.env.MEMORY_DIR;
-    else process.env.MEMORY_DIR = prev;
+    if (prev === undefined) delete process.env.OPENCODE_MEMORY_DIR;
+    else process.env.OPENCODE_MEMORY_DIR = prev;
     tmp.cleanup();
   }
 }

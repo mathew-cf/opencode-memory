@@ -41,7 +41,7 @@ import { mkdir, symlink, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, resolve as resolvePath } from "node:path";
 import { fileURLToPath } from "node:url";
-import { CATEGORIES } from "./constants";
+import { CATEGORIES, DEFAULT_MEMORY_SUBDIR } from "./constants";
 import { resolveMemoryDir } from "./lib/paths";
 import { downloadModel, resolveRagBinary } from "./lib/rag";
 import { resolveRgBinary } from "./lib/ripgrep";
@@ -99,11 +99,7 @@ export interface InitResult {
  *    (unusual; usually means the package layout was tampered with)
  */
 export interface SkillInstallResult {
-  status:
-    | "created"
-    | "already-installed"
-    | "skipped-existing"
-    | "unavailable";
+  status: "created" | "already-installed" | "skipped-existing" | "unavailable";
   /** Absolute path of the link we attempted to create. */
   linkPath: string;
   /** Absolute path the link points at (or would point at). */
@@ -245,9 +241,7 @@ export async function initMemory(
     }
   }
   if (result.createdCategories.length > 0) {
-    note(
-      `✓ created category dirs: ${result.createdCategories.join(", ")}`,
-    );
+    note(`✓ created category dirs: ${result.createdCategories.join(", ")}`);
   } else {
     note(`✓ all ${CATEGORIES.length} category dirs already present`);
   }
@@ -283,14 +277,10 @@ export async function initMemory(
         note(`✓ skill already installed at ${install.linkPath}`);
         break;
       case "skipped-existing":
-        note(
-          `⚠ ${install.linkPath} already exists (not our symlink) — left untouched`,
-        );
+        note(`⚠ ${install.linkPath} already exists (not our symlink) — left untouched`);
         break;
       case "unavailable":
-        note(
-          "⚠ bundled skill directory not resolvable — skill install skipped (unusual; check package layout)",
-        );
+        note("⚠ bundled skill directory not resolvable — skill install skipped (unusual; check package layout)");
         break;
     }
   }
@@ -307,8 +297,8 @@ export function usage(): string {
     "",
     "Commands:",
     "  init [--skip-model] [--skip-skills] [--quiet]",
-    "      Initialize the memory directory ($MEMORY_DIR or",
-    "      ~/opencode-memory): mkdir, git init, create category",
+    "      Initialize the memory directory ($OPENCODE_MEMORY_DIR or",
+    `      ~/${DEFAULT_MEMORY_SUBDIR} by default): mkdir, git init, create category`,
     "      subdirs, pre-cache the embedding model, install the",
     "      bundled skill into ~/.agents/skills/ (used by Zed and",
     "      Pi). Idempotent.",
@@ -345,22 +335,52 @@ export function parseInitFlags(argv: string[]): InitOptions {
   return opts;
 }
 
-/** CLI dispatcher. Exported so tests can drive it without exec(). */
-export async function dispatch(argv: string[]): Promise<number> {
+/**
+ * Writer functions for `dispatch`. Each receives a chunk of text exactly
+ * as it would be passed to `process.stdout.write` / `process.stderr.write`
+ * — including any trailing newlines. Callers must include their own
+ * newlines so passing `process.stdout.write.bind(process.stdout)` reads
+ * naturally.
+ *
+ * Exists primarily so tests can silence the CLI output without
+ * monkey-patching `process.stdout`, but the same shape lets embedders
+ * (e.g. a wrapping daemon) capture or redirect output cleanly.
+ */
+export interface DispatchIO {
+  /** Defaults to `process.stdout.write` bound to stdout. */
+  out?: (chunk: string) => void;
+  /** Defaults to `process.stderr.write` bound to stderr. */
+  err?: (chunk: string) => void;
+}
+
+/**
+ * CLI dispatcher. Exported so tests can drive it without exec().
+ *
+ * Output is routed through the optional `io.out` / `io.err` writers so
+ * tests (and any embedder) can capture or silence the chatter without
+ * having to monkey-patch global stdio. Defaults preserve the standalone
+ * bin behaviour exactly.
+ */
+export async function dispatch(argv: string[], io: DispatchIO = {}): Promise<number> {
+  const out = io.out ?? ((chunk: string) => void process.stdout.write(chunk));
+  const err = io.err ?? ((chunk: string) => void process.stderr.write(chunk));
   const cmd = argv[0];
   switch (cmd) {
     case "init": {
       const opts = parseInitFlags(argv.slice(1));
       try {
-        await initMemory(resolveMemoryDir(), opts);
+        // Route initMemory's log lines through the same `out` writer so
+        // a silenced dispatch silences init progress too. initMemory
+        // expects a no-newline `log(msg)`, so we add the newline here.
+        await initMemory(resolveMemoryDir(), opts, (msg) => out(msg + "\n"));
         return 0;
-      } catch (err) {
-        process.stderr.write(`opencode-memory init failed: ${String(err)}\n`);
+      } catch (e) {
+        err(`opencode-memory init failed: ${String(e)}\n`);
         return 1;
       }
     }
     case "status": {
-      process.stdout.write((await runSetup()) + "\n");
+      out((await runSetup()) + "\n");
       // Status returns nonzero when either backend is unresolvable, so
       // `bunx @mathew-cf/opencode-memory status` can be used in CI.
       const ok = resolveRagBinary() !== null && resolveRgBinary() !== null;
@@ -370,12 +390,12 @@ export async function dispatch(argv: string[]): Promise<number> {
     case "help":
     case "--help":
     case "-h": {
-      process.stdout.write(usage() + "\n");
+      out(usage() + "\n");
       return 0;
     }
     default: {
-      process.stderr.write(`Unknown command: ${cmd}\n\n`);
-      process.stdout.write(usage() + "\n");
+      err(`Unknown command: ${cmd}\n\n`);
+      out(usage() + "\n");
       return 1;
     }
   }
@@ -383,18 +403,31 @@ export async function dispatch(argv: string[]): Promise<number> {
 
 // Direct invocation guard. When bundled to dist/cli.js and called via
 // the `bin` shim, this branch fires; when imported by tests it does not.
+//
+// We deliberately do NOT use `import.meta.main` here. Bun's
+// `--target node` bundler transpiles it to
+//   __require.main == __require.module === true
+// which evaluates to `true` under dynamic `import()` because both
+// values are undefined. If `cli.js` ever gets bundled into another
+// entry (or imported indirectly), the bug would auto-execute
+// `dispatch(process.argv.slice(2))` and call `process.exit()` — killing
+// the host process. See the symmetric fix in `src/mcp.ts`.
+//
+// Argv-based detection covers every actual direct-invocation case:
+//   - `bunx @mathew-cf/opencode-memory` / `opencode-memory` bin
+//   - `bun dist/cli.js` / `node dist/cli.js`
+//   - `bun src/cli.ts`
 const isDirect = (() => {
   try {
-    // import.meta.main is `true` when this file is the entry point under bun.
-    // process.argv[1] check is the Node-portable fallback after bundling.
+    const arg = process.argv[1];
+    if (typeof arg !== "string" || arg.length === 0) return false;
     return (
-      // @ts-ignore — `main` exists on Bun's import.meta, not vanilla Node.
-      import.meta.main === true ||
-      (typeof process.argv[1] === "string" &&
-        (process.argv[1].endsWith("/cli.js") ||
-          process.argv[1].endsWith("\\cli.js") ||
-          process.argv[1].endsWith("/opencode-memory") ||
-          process.argv[1].endsWith("\\opencode-memory")))
+      arg.endsWith("/cli.js") ||
+      arg.endsWith("\\cli.js") ||
+      arg.endsWith("/cli.ts") ||
+      arg.endsWith("\\cli.ts") ||
+      arg.endsWith("/opencode-memory") ||
+      arg.endsWith("\\opencode-memory")
     );
   } catch {
     return false;

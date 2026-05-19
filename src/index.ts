@@ -87,6 +87,15 @@ export default {
 };
 
 // Re-exports for power users who want to wire pieces into their own plugin.
+//
+// NOTE: We intentionally do NOT re-export from `./mcp` here. That module
+// has top-level side effects (auto-starts the MCP stdio server when it
+// detects direct invocation) and pulls in 1.2 MB of MCP SDK + zod via
+// its bundled deps. If OpenCode imports this entry, those side effects
+// fire inside the host process — most visibly, `StdioServerTransport`
+// attaches a `data` listener to `process.stdin` and starts stealing
+// keystrokes from the TUI. The MCP server is reachable as its own bin
+// (`opencode-memory-mcp`) and via subpath import (`@mathew-cf/opencode-memory/mcp`).
 export { applyConfig, MEMORY_PROMPT_APPENDIX, TARGET_AGENTS } from "./config";
 export {
   afterToolUpdate,
@@ -96,6 +105,5 @@ export {
   matchesToolName,
   type SessionState,
 } from "./hooks/guard";
-export { createMcpServer, runMcpServer } from "./mcp";
 export * as memoryTools from "./tools/memory";
 export * as sessionTools from "./tools/session";

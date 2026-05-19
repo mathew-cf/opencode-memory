@@ -41,6 +41,10 @@ import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
 import { z, type ZodRawShape } from "zod";
 import { CATEGORIES } from "./constants";
 import {
+  memoryAccessPathDescription,
+  memoryListDescription,
+  memorySaveDescription,
+  memorySearchDescription,
   runAccess,
   runList,
   runSave,
@@ -138,27 +142,10 @@ export function createMcpServer(): McpServer {
     "memory_search",
     {
       title: "Search memory",
-      description:
-        "Search memories in ~/opencode-memory/ using both keyword (rg) and semantic (rag) search. " +
-        "Results are summaries only (path, tags, importance, short context). " +
-        "Use the Read tool on ~/opencode-memory/{path} to get the full content.\n\n" +
-        "Multi-term queries match files containing ANY search term (OR logic); files matching more terms rank higher. " +
-        "For example, 'errors retries' finds files mentioning 'errors' OR 'retries', with files containing both ranked first.\n\n" +
-        "WHEN TO SEARCH (do this BEFORE starting work):\n" +
-        "- Starting work on any repo — there may be saved context about structure, conventions, or gotchas\n" +
-        "- Using an external tool or API with non-obvious usage patterns\n" +
-        "- Encountering an unfamiliar codebase, service, or system\n" +
-        "- Debugging a problem you or a previous session may have solved before\n" +
-        "- Looking up a person, team, or ownership information\n" +
-        "- Before writing new memory — check if a file already exists to update instead of duplicate",
+      description: memorySearchDescription(),
       inputSchema: {
-        query: z
-          .string()
-          .describe("Search terms or natural language query"),
-        category: z
-          .string()
-          .optional()
-          .describe(`Filter to a specific category. ${categoryEnum}`),
+        query: z.string().describe("Search terms or natural language query"),
+        category: z.string().optional().describe(`Filter to a specific category. ${categoryEnum}`),
       },
     },
     async ({ query, category }) => {
@@ -175,14 +162,9 @@ export function createMcpServer(): McpServer {
     "memory_list",
     {
       title: "List memory categories or files",
-      description:
-        "Browse memories in ~/opencode-memory/. Without a category, lists all categories with file counts. " +
-        "With a category, lists files in that category with their summaries.",
+      description: memoryListDescription(),
       inputSchema: {
-        category: z
-          .string()
-          .optional()
-          .describe(`Category to list. ${categoryEnum}`),
+        category: z.string().optional().describe(`Category to list. ${categoryEnum}`),
       },
     },
     async ({ category }) => {
@@ -199,29 +181,7 @@ export function createMcpServer(): McpServer {
     "memory_save",
     {
       title: "Commit + re-index memory changes",
-      description:
-        "Commit and re-index all pending memory changes. " +
-        "Call AFTER writing/editing files at ~/opencode-memory/{category}/{filename}.md. " +
-        "Handles: git add -A, commit (message derived from changed files), RAG re-indexing.\n\n" +
-        "WHEN TO SAVE (always save when you discover something reusable):\n" +
-        "- Learned a non-obvious API pattern, tool quirk, or workaround\n" +
-        "- Discovered repo structure, conventions, or gotchas that future sessions would benefit from\n" +
-        "- Resolved a tricky debugging problem with a non-obvious root cause\n" +
-        "- Learned team/ownership/contact information not easily found elsewhere\n" +
-        "DO NOT save: one-off answers, things in public docs, or context only relevant to the current task\n\n" +
-        "REPO NOTES: for repository-related memory, use the path structure\n" +
-        "`repos/{host}/{org}/{repo}.md` — e.g. `repos/github.com/user/project.md`.\n\n" +
-        `CATEGORIES: ${CATEGORIES.join(", ")}\n\n` +
-        "FRONTMATTER (include at top of every file):\n" +
-        "---\n" +
-        "title: Human-readable title\n" +
-        "tags: [tag1, tag2]\n" +
-        "summary: One-line summary\n" +
-        "created: YYYY-MM-DD\n" +
-        "updated: YYYY-MM-DD\n" +
-        "importance: high | medium | low\n" +
-        "related: [category/file.md]\n" +
-        "---",
+      description: memorySaveDescription(),
       inputSchema: {},
     },
     async () => {
@@ -244,11 +204,7 @@ export function createMcpServer(): McpServer {
         "that you actually used to inform your work — not for casual browsing.\n\n" +
         "This helps the memory system track which memories are actively useful vs. stale.",
       inputSchema: {
-        path: z
-          .string()
-          .describe(
-            "Relative path within ~/opencode-memory/ (e.g. 'technical/build-tooling.md')",
-          ),
+        path: z.string().describe(memoryAccessPathDescription()),
       },
     },
     async ({ path }) => {
@@ -295,17 +251,35 @@ export async function runMcpServer(): Promise<void> {
 }
 
 // Direct invocation guard. Fires when bundled to dist/mcp.js and invoked
-// via the bin shim; suppressed when imported by tests.
+// via the bin shim; suppressed when imported by tests OR when this file
+// happens to be bundled into another entry (e.g. a misconfigured plugin
+// bundle).
+//
+// We deliberately do NOT use `import.meta.main` here. Bun's `--target node`
+// bundler transpiles it to `__require.main == __require.module === true`,
+// but `require.module` doesn't exist on Node's `require` (it's always
+// undefined) and when the bundle is loaded via dynamic import, `require.main`
+// is also undefined — so the expression evaluates to `true` and the MCP
+// server auto-starts inside whatever process imported the bundle. The MCP
+// server then attaches a `data` listener to `process.stdin`, which steals
+// keystrokes from any host TUI (OpenCode, in particular). Past bug — see
+// the regression test in `test/mcp.test.ts`.
+//
+// Argv-based detection covers every actual direct-invocation case:
+//   - `bunx @mathew-cf/opencode-memory-mcp` → argv[1] = .../opencode-memory-mcp
+//   - `bun dist/mcp.js` / `node dist/mcp.js` → argv[1] ends in /mcp.js
+//   - `bun src/mcp.ts`                       → argv[1] ends in /mcp.ts
 const isDirect = (() => {
   try {
+    const arg = process.argv[1];
+    if (typeof arg !== "string" || arg.length === 0) return false;
     return (
-      // @ts-ignore — `main` exists on Bun's import.meta, not vanilla Node.
-      import.meta.main === true ||
-      (typeof process.argv[1] === "string" &&
-        (process.argv[1].endsWith("/mcp.js") ||
-          process.argv[1].endsWith("\\mcp.js") ||
-          process.argv[1].endsWith("/opencode-memory-mcp") ||
-          process.argv[1].endsWith("\\opencode-memory-mcp")))
+      arg.endsWith("/mcp.js") ||
+      arg.endsWith("\\mcp.js") ||
+      arg.endsWith("/mcp.ts") ||
+      arg.endsWith("\\mcp.ts") ||
+      arg.endsWith("/opencode-memory-mcp") ||
+      arg.endsWith("\\opencode-memory-mcp")
     );
   } catch {
     return false;

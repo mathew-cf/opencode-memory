@@ -269,27 +269,31 @@ describe("installSkill", () => {
 });
 
 describe("dispatch", () => {
+  // Silence CLI output during dispatch tests so command-line noise
+  // (usage strings, backend status, etc.) doesn't leak into the bun
+  // test runner's stdout. Real production callers still get the
+  // default `process.stdout` / `process.stderr` behaviour.
+  const silent = { out: () => {}, err: () => {} };
+
   test("returns 0 for help / no args", async () => {
-    expect(await dispatch([])).toBe(0);
-    expect(await dispatch(["help"])).toBe(0);
-    expect(await dispatch(["--help"])).toBe(0);
-    expect(await dispatch(["-h"])).toBe(0);
+    expect(await dispatch([], silent)).toBe(0);
+    expect(await dispatch(["help"], silent)).toBe(0);
+    expect(await dispatch(["--help"], silent)).toBe(0);
+    expect(await dispatch(["-h"], silent)).toBe(0);
   });
 
   test("returns nonzero for unknown commands", async () => {
-    expect(await dispatch(["banana"])).toBe(1);
+    expect(await dispatch(["banana"], silent)).toBe(1);
   });
 
   test("init runs end-to-end against a temp dir", async () => {
     await withMemoryDir(async (dir) => {
       // `dispatch` doesn't accept `skillLinkDir` — pass --skip-skills
       // so the run doesn't try to write into ~/.agents/skills/.
-      const code = await dispatch([
-        "init",
-        "--skip-model",
-        "--skip-skills",
-        "--quiet",
-      ]);
+      const code = await dispatch(
+        ["init", "--skip-model", "--skip-skills", "--quiet"],
+        silent,
+      );
       expect(code).toBe(0);
       expect(existsSync(`${dir}/.git`)).toBe(true);
       for (const cat of CATEGORIES) {
@@ -301,7 +305,29 @@ describe("dispatch", () => {
   test("status returns 0 when both backends resolve", async () => {
     // Both backends are deps in this repo, so this assertion runs in
     // tests; in environments where one is missing dispatch returns 1.
-    const code = await dispatch(["status"]);
+    const code = await dispatch(["status"], silent);
     expect([0, 1]).toContain(code);
+  });
+
+  test("routes help output through io.out", async () => {
+    const out: string[] = [];
+    const code = await dispatch(["help"], { out: (chunk) => out.push(chunk) });
+    expect(code).toBe(0);
+    const joined = out.join("");
+    expect(joined).toContain("Usage: opencode-memory");
+    expect(joined).toContain("init");
+  });
+
+  test("routes unknown-command errors through io.err", async () => {
+    const out: string[] = [];
+    const err: string[] = [];
+    const code = await dispatch(["banana"], {
+      out: (chunk) => out.push(chunk),
+      err: (chunk) => err.push(chunk),
+    });
+    expect(code).toBe(1);
+    expect(err.join("")).toContain("Unknown command: banana");
+    // Usage still printed to stdout so the user sees what's available.
+    expect(out.join("")).toContain("Usage: opencode-memory");
   });
 });

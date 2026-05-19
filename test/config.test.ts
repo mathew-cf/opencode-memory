@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import {
   applyConfig,
+  buildMemoryPromptAppendix,
   EXPLORE_PERMISSIONS,
   MEMORY_PROMPT_APPENDIX,
   TARGET_AGENTS,
@@ -13,9 +14,7 @@ describe("applyConfig", () => {
       skillsDir: "/pkg/skills",
       memoryDir: "/home/u/opencode-memory",
     });
-    expect((config as { skills?: { paths?: string[] } }).skills?.paths).toEqual([
-      "/pkg/skills",
-    ]);
+    expect((config as { skills?: { paths?: string[] } }).skills?.paths).toEqual(["/pkg/skills"]);
   });
 
   test("does not duplicate the skill path on a second pass", () => {
@@ -26,9 +25,7 @@ describe("applyConfig", () => {
       skillsDir: "/pkg/skills",
       memoryDir: "/home/u/opencode-memory",
     });
-    expect((config as { skills?: { paths?: string[] } }).skills?.paths).toEqual([
-      "/pkg/skills",
-    ]);
+    expect((config as { skills?: { paths?: string[] } }).skills?.paths).toEqual(["/pkg/skills"]);
   });
 
   test("appends to an existing skills.paths array", () => {
@@ -39,10 +36,7 @@ describe("applyConfig", () => {
       skillsDir: "/pkg/skills",
       memoryDir: "/home/u/opencode-memory",
     });
-    expect((config as { skills?: { paths?: string[] } }).skills?.paths).toEqual([
-      "/existing",
-      "/pkg/skills",
-    ]);
+    expect((config as { skills?: { paths?: string[] } }).skills?.paths).toEqual(["/existing", "/pkg/skills"]);
   });
 
   test("adds permission rules for the memory directory", () => {
@@ -51,16 +45,16 @@ describe("applyConfig", () => {
       skillsDir: undefined,
       memoryDir: "/home/u/opencode-memory",
     });
-    const perm = (config as {
-      permission?: {
-        edit?: Record<string, string>;
-        external_directory?: Record<string, string>;
-      };
-    }).permission;
+    const perm = (
+      config as {
+        permission?: {
+          edit?: Record<string, string>;
+          external_directory?: Record<string, string>;
+        };
+      }
+    ).permission;
     expect(perm?.edit?.["/home/u/opencode-memory/**"]).toBe("allow");
-    expect(perm?.external_directory?.["/home/u/opencode-memory/**"]).toBe(
-      "allow",
-    );
+    expect(perm?.external_directory?.["/home/u/opencode-memory/**"]).toBe("allow");
   });
 
   test("does not overwrite an existing permission entry", () => {
@@ -72,20 +66,19 @@ describe("applyConfig", () => {
     applyConfig(config, {
       memoryDir: "/home/u/opencode-memory",
     });
-    const perm = (config as { permission?: { edit?: Record<string, string> } })
-      .permission;
+    const perm = (config as { permission?: { edit?: Record<string, string> } }).permission;
     expect(perm?.edit?.["/home/u/opencode-memory/**"]).toBe("deny");
   });
 
-  test("sets the memory prompt on each target agent when none was present", () => {
+  test("sets the memory prompt on each target agent using the configured directory", () => {
     const config: Record<string, unknown> = {};
-    applyConfig(config, {
-      memoryDir: "/home/u/opencode-memory",
-    });
-    const agent = (config as { agent?: Record<string, { prompt?: string }> })
-      .agent;
+    const memoryDir = "/home/u/.config/opencode/memory";
+    applyConfig(config, { memoryDir });
+    const agent = (config as { agent?: Record<string, { prompt?: string }> }).agent;
     for (const name of TARGET_AGENTS) {
-      expect(agent?.[name]?.prompt).toBe(MEMORY_PROMPT_APPENDIX);
+      expect(agent?.[name]?.prompt).toBe(buildMemoryPromptAppendix(memoryDir));
+      expect(agent?.[name]?.prompt).toContain("/home/u/.config/opencode/memory/{category}/{filename}.md");
+      expect(agent?.[name]?.prompt).not.toContain("~/opencode-memory");
     }
   });
 
@@ -96,14 +89,10 @@ describe("applyConfig", () => {
       },
     };
     applyConfig(config, { memoryDir: "/home/u/opencode-memory" });
-    const prompt = (
-      config as { agent?: Record<string, { prompt?: string }> }
-    ).agent?.general?.prompt;
+    const prompt = (config as { agent?: Record<string, { prompt?: string }> }).agent?.general?.prompt;
     expect(prompt).toContain("do thing X always");
     expect(prompt).toContain("memory_search");
-    expect(prompt?.indexOf("memory_search")).toBeLessThan(
-      prompt?.indexOf("do thing X always") ?? Infinity,
-    );
+    expect(prompt?.indexOf("memory_search")).toBeLessThan(prompt?.indexOf("do thing X always") ?? Infinity);
   });
 
   test("does not prepend if the prompt already mentions memory_search", () => {
@@ -112,10 +101,12 @@ describe("applyConfig", () => {
       agent: { general: { prompt: preset } },
     };
     applyConfig(config, { memoryDir: "/home/u/opencode-memory" });
-    const prompt = (
-      config as { agent?: Record<string, { prompt?: string }> }
-    ).agent?.general?.prompt;
+    const prompt = (config as { agent?: Record<string, { prompt?: string }> }).agent?.general?.prompt;
     expect(prompt).toBe(preset);
+  });
+
+  test("keeps the default prompt appendix pointed at the default directory", () => {
+    expect(MEMORY_PROMPT_APPENDIX).toContain("~/opencode-memory");
   });
 
   test("adds explore permissions for the memory/session tools", () => {
@@ -131,17 +122,12 @@ describe("applyConfig", () => {
     }
   });
 
-  test("gives non-explore agents an edit allowance for the memory dir", () => {
+  test("gives non-explore agents an edit allowance for the normalized memory dir", () => {
     const config: Record<string, unknown> = {};
-    applyConfig(config, { memoryDir: "/home/u/opencode-memory" });
+    applyConfig(config, { memoryDir: "/home/u/.config/opencode/memory/" });
     const agent = config as {
-      agent?: Record<
-        string,
-        { permission?: { edit?: Record<string, string> } }
-      >;
+      agent?: Record<string, { permission?: { edit?: Record<string, string> } }>;
     };
-    expect(
-      agent.agent?.general?.permission?.edit?.["/home/u/opencode-memory/**"],
-    ).toBe("allow");
+    expect(agent.agent?.general?.permission?.edit?.["/home/u/.config/opencode/memory/**"]).toBe("allow");
   });
 });

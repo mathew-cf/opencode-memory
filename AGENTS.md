@@ -99,7 +99,7 @@ This lets tests cover the real behaviour without constructing a fake OpenCode co
 
 ### Env-driven configuration
 
-The lib layer never reads config statically. Both `resolveMemoryDir()` and `resolveDbPath()` read `process.env` fresh on each call. That's how tests inject temp directories (`withMemoryDir` sets `MEMORY_DIR`) and temp databases (`session.test.ts` sets `OPENCODE_DB` in `beforeAll`).
+The lib layer never reads config statically. Both `resolveMemoryDir()` and `resolveDbPath()` read `process.env` fresh on each call. That's how tests inject temp directories (`withMemoryDir` sets `OPENCODE_MEMORY_DIR`) and temp databases (`session.test.ts` sets `OPENCODE_DB` in `beforeAll`).
 
 ### Graceful degradation around `rag`
 
@@ -117,7 +117,7 @@ The `rag` CLI is optional. `ensureRag()` silently tries a `cargo install` fallba
 
 ## Test Patterns
 
-- `test/helpers.ts` provides `withMemoryDir(cb)` which creates a fresh temp dir, points `$MEMORY_DIR` at it, runs the callback, then cleans up and restores the env.
+- `test/helpers.ts` provides `withMemoryDir(cb)` which creates a fresh temp dir, points `$OPENCODE_MEMORY_DIR` at it, runs the callback, then cleans up and restores the env.
 - Pure-logic tests (`frontmatter.test.ts`, `search-terms.test.ts`, `paths.test.ts`, `guard.test.ts`, `config.test.ts`) take <100ms in aggregate — they don't hit the filesystem at all.
 - `memory.test.ts` and `session.test.ts` are integration tests. `session.test.ts` builds a temp SQLite DB with the minimum schema we actually touch; `memory.test.ts` runs rg shell-outs against real files so bugs in the rg arg assembly get caught.
 - Ranking assertions are **relative, not absolute** — e.g. `expect(aIdx).toBeLessThan(bIdx)`. Pinning exact scores makes the ranker impossible to tune.

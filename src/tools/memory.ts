@@ -3,34 +3,23 @@
  *
  * The memory root is resolved lazily via `resolveMemoryDir()` so that
  * tests can point the whole plugin at a temp directory by setting
- * `$MEMORY_DIR` before importing.
+ * `$OPENCODE_MEMORY_DIR` before importing.
  */
 
 import { tool, type ToolDefinition } from "@opencode-ai/plugin";
+import { posix } from "node:path";
 import { CATEGORIES } from "../constants";
+import { bumpAccessFields, parseFrontmatter, todayISO, type FrontMatter } from "../lib/frontmatter";
 import {
-  bumpAccessFields,
-  parseFrontmatter,
-  todayISO,
-  type FrontMatter,
-} from "../lib/frontmatter";
-import { normPath, ragIndexDir, resolveMemoryDir } from "../lib/paths";
-import {
-  installGuidance,
-  ragAvailable,
-  ragSearch,
-  resolveRagBinary,
-  spawnRagIndex,
-} from "../lib/rag";
-import {
-  resolveRgBinary,
-  rgInstallGuidance,
-} from "../lib/ripgrep";
-import {
-  countTermMatches,
-  parseSearchTerms,
-  scoreCandidate,
-} from "../lib/search-terms";
+  formatMemoryDirForDisplay,
+  formatMemoryPathForDisplay,
+  normPath,
+  ragIndexDir,
+  resolveMemoryDir,
+} from "../lib/paths";
+import { installGuidance, ragAvailable, ragSearch, resolveRagBinary, spawnRagIndex } from "../lib/rag";
+import { resolveRgBinary, rgInstallGuidance } from "../lib/ripgrep";
+import { countTermMatches, parseSearchTerms, scoreCandidate } from "../lib/search-terms";
 
 // --- Internal helpers ---------------------------------------------------
 
@@ -39,17 +28,7 @@ import {
  * Kept as a pure function so tests can verify the exact args shape.
  */
 export function buildRgArgs(terms: string[]): string[] {
-  const args = [
-    "-il",
-    "--glob",
-    "*.md",
-    "--glob",
-    "!.git",
-    "--glob",
-    "!.rag",
-    "--glob",
-    "!**/INDEX.md",
-  ];
+  const args = ["-il", "--glob", "*.md", "--glob", "!.git", "--glob", "!.rag", "--glob", "!**/INDEX.md"];
   for (const term of terms) {
     args.push("-e", term);
   }
@@ -60,19 +39,13 @@ export function buildRgArgs(terms: string[]): string[] {
  * Parse the output of a `rag search --json` invocation. Returns an empty
  * array on any failure. Exported for tests.
  */
-export function parseRagHits(
-  ragText: string,
-): Array<{ source: string; score: number; text: string }> {
+export function parseRagHits(ragText: string): Array<{ source: string; score: number; text: string }> {
   if (!ragText) return [];
   try {
     const parsed = JSON.parse(ragText);
     if (!Array.isArray(parsed)) return [];
     return parsed.filter(
-      (hit) =>
-        hit &&
-        typeof hit.source === "string" &&
-        typeof hit.score === "number" &&
-        typeof hit.text === "string",
+      (hit) => hit && typeof hit.source === "string" && typeof hit.score === "number" && typeof hit.text === "string",
     );
   } catch {
     return [];
@@ -85,16 +58,32 @@ export function parseRagHits(
  * result map.
  */
 export function toRelPath(memoryDir: string, absPath: string): string {
-  return normPath(absPath).replace(`${memoryDir}/`, "");
+  return posix.relative(memoryDir, normPath(absPath));
 }
 
-// --- Tools --------------------------------------------------------------
+function configuredMemoryDirLabel(memoryDir?: string): string {
+  try {
+    return formatMemoryDirForDisplay(memoryDir ?? resolveMemoryDir());
+  } catch {
+    return "the configured memory directory";
+  }
+}
 
-export const search: ToolDefinition = tool({
-  description:
-    "Search memories in ~/opencode-memory/ using both keyword (rg) and semantic (rag) search. " +
+function configuredMemoryPathLabel(relPath: string, memoryDir?: string): string {
+  try {
+    return formatMemoryPathForDisplay(memoryDir ?? resolveMemoryDir(), relPath);
+  } catch {
+    return `the configured memory directory/${relPath}`;
+  }
+}
+
+export function memorySearchDescription(memoryDir?: string): string {
+  const memoryRoot = configuredMemoryDirLabel(memoryDir);
+  const memoryPath = configuredMemoryPathLabel("{path}", memoryDir);
+  return (
+    `Search memories in ${memoryRoot} using both keyword (rg) and semantic (rag) search. ` +
     "Results are summaries only (path, tags, importance, short context). " +
-    "Use the Read tool on ~/opencode-memory/{path} to get the full content.\n\n" +
+    `Use the Read tool on ${memoryPath} to get the full content.\n\n` +
     "Multi-term queries match files containing ANY search term (OR logic); files matching more terms rank higher. " +
     "For example, 'errors retries' finds files mentioning 'errors' OR 'retries', with files containing both ranked first.\n\n" +
     "WHEN TO SEARCH (do this BEFORE starting work):\n" +
@@ -105,19 +94,69 @@ export const search: ToolDefinition = tool({
     "- Looking up a person, team, or ownership information\n" +
     "- Before writing new memory — check if a file already exists to update instead of duplicate\n\n" +
     "FOLLOW-UP SEARCHES (do when results seem incomplete):\n" +
-    "- Results include Related: files — use the Read tool on ~/opencode-memory/{path} for connected knowledge\n" +
+    `- Results include Related: files — use the Read tool on ${memoryPath} for connected knowledge\n` +
     "- If few/no results, try broader terms or search without the category filter\n" +
-    "- Check the 'Related files' section at the bottom of results for cross-references worth exploring",
+    "- Check the 'Related files' section at the bottom of results for cross-references worth exploring"
+  );
+}
+
+export function memoryListDescription(memoryDir?: string): string {
+  const memoryRoot = configuredMemoryDirLabel(memoryDir);
+  return (
+    `Browse memories in ${memoryRoot}. Without a category, lists all categories with file counts. ` +
+    "With a category, lists files in that category with their summaries."
+  );
+}
+
+export function memoryAccessPathDescription(memoryDir?: string): string {
+  const memoryRoot = configuredMemoryDirLabel(memoryDir);
+  return `Relative path within ${memoryRoot} (e.g. 'technical/build-tooling.md')`;
+}
+
+export function memorySaveDescription(memoryDir?: string): string {
+  const memoryPath = configuredMemoryPathLabel("{category}/{filename}.md", memoryDir);
+  return (
+    "Commit and re-index all pending memory changes. " +
+    `Call AFTER using Write/Edit tools on ${memoryPath}. ` +
+    "Handles: git add -A, commit (message derived from changed files), RAG re-indexing.\n\n" +
+    "WHEN TO SAVE (always save when you discover something reusable):\n" +
+    "- Learned a non-obvious API pattern, tool quirk, or workaround\n" +
+    "- Discovered repo structure, conventions, or gotchas that future sessions would benefit from\n" +
+    "- Found external tool usage patterns that weren't documented\n" +
+    "- Resolved a tricky debugging problem with a non-obvious root cause\n" +
+    "- Learned team/ownership/contact information not easily found elsewhere\n" +
+    "DO NOT save: one-off answers, things in public docs, or context only relevant to the current task\n\n" +
+    "WORKFLOW:\n" +
+    "1. memory_search first — check if a file already exists to update\n" +
+    `2. Write/Edit files at ${memoryPath}\n` +
+    "3. Call this tool to sync all changes\n\n" +
+    "REPO NOTES: for repository-related memory, use the path structure\n" +
+    "`repos/{host}/{org}/{repo}.md` — e.g. `repos/github.com/user/project.md`.\n" +
+    "This makes it easy to find later by repo URL fragments.\n\n" +
+    "CATEGORIES: preferences, repos, technical, people, workflows, snippets, notes\n\n" +
+    "FRONTMATTER FORMAT (include at top of file):\n" +
+    "---\n" +
+    "title: Human-readable title\n" +
+    "tags: [tag1, tag2]\n" +
+    "summary: One-line summary\n" +
+    "created: YYYY-MM-DD\n" +
+    "updated: YYYY-MM-DD\n" +
+    "importance: high | medium | low\n" +
+    "related: [category/file.md]\n" +
+    "---"
+  );
+}
+
+// --- Tools --------------------------------------------------------------
+
+export const search: ToolDefinition = tool({
+  description: memorySearchDescription(),
   args: {
-    query: tool.schema
-      .string()
-      .describe("Search terms or natural language query"),
+    query: tool.schema.string().describe("Search terms or natural language query"),
     category: tool.schema
       .string()
       .optional()
-      .describe(
-        "Filter to a specific category: preferences, repos, technical, people, workflows, snippets, notes",
-      ),
+      .describe("Filter to a specific category: preferences, repos, technical, people, workflows, snippets, notes"),
   },
   async execute({ query, category }) {
     return runSearch({ query, category });
@@ -129,14 +168,11 @@ export const search: ToolDefinition = tool({
  * wrapper so tests can call it with plain arguments and assert against the
  * returned string without constructing a full tool context.
  */
-export async function runSearch(input: {
-  query: string;
-  category?: string;
-}): Promise<string> {
+export async function runSearch(input: { query: string; category?: string }): Promise<string> {
   const { query, category } = input;
   const memoryDir = resolveMemoryDir();
   const indexDir = ragIndexDir(memoryDir);
-  const searchDir = category ? `${memoryDir}/${category}` : memoryDir;
+  const searchDir = category ? posix.join(memoryDir, category) : memoryDir;
   const terms = parseSearchTerms(query);
   const rgTerms = terms.length > 0 ? terms : [query];
 
@@ -144,20 +180,11 @@ export async function runSearch(input: {
   const rgBin = resolveRgBinary();
 
   const [rgResult, ragResultText] = await Promise.all([
-    rgBin
-      ? Bun.$`${rgBin} ${buildRgArgs(rgTerms)} ${searchDir}`
-          .text()
-          .catch(() => "")
-      : Promise.resolve(""),
-    hasRag
-      ? ragSearch({ query, indexDir, topK: 15 })
-      : Promise.resolve(""),
+    rgBin ? Bun.$`${rgBin} ${buildRgArgs(rgTerms)} ${searchDir}`.text().catch(() => "") : Promise.resolve(""),
+    hasRag ? ragSearch({ query, indexDir, topK: 15 }) : Promise.resolve(""),
   ]);
 
-  const resultMap = new Map<
-    string,
-    { rgMatch: boolean; ragScore?: number; ragText?: string }
-  >();
+  const resultMap = new Map<string, { rgMatch: boolean; ragScore?: number; ragText?: string }>();
 
   const rgText = rgResult.trim();
   if (rgText) {
@@ -184,11 +211,7 @@ export async function runSearch(input: {
   let crossCategoryFallback = false;
   if (resultMap.size === 0 && category) {
     crossCategoryFallback = true;
-    const globalRgText = rgBin
-      ? await Bun.$`${rgBin} ${buildRgArgs(rgTerms)} ${memoryDir}`
-          .text()
-          .catch(() => "")
-      : "";
+    const globalRgText = rgBin ? await Bun.$`${rgBin} ${buildRgArgs(rgTerms)} ${memoryDir}`.text().catch(() => "") : "";
     if (globalRgText.trim()) {
       for (const line of globalRgText.trim().split("\n")) {
         const rel = toRelPath(memoryDir, line);
@@ -209,7 +232,7 @@ export async function runSearch(input: {
   }
 
   if (resultMap.size === 0) {
-    const scanDir = category ? `${memoryDir}/${category}` : memoryDir;
+    const scanDir = category ? posix.join(memoryDir, category) : memoryDir;
     const suggestions: string[] = [];
     try {
       const fnGlob = new Bun.Glob("**/*.md");
@@ -229,7 +252,7 @@ export async function runSearch(input: {
         `No content matches for: "${query}"\n\n` +
         `Files with matching names:\n${suggestions
           .slice(0, 5)
-          .map((s) => `  - ~/opencode-memory/${s}`)
+          .map((s) => `  - ${formatMemoryPathForDisplay(memoryDir, s)}`)
           .join("\n")}\n\n` +
         `Use the Read tool to check these.`
       );
@@ -250,14 +273,9 @@ export async function runSearch(input: {
 
   for (const [path, info] of resultMap) {
     try {
-      const content = await Bun.file(`${memoryDir}/${path}`).text();
+      const content = await Bun.file(posix.join(memoryDir, path)).text();
       const { meta } = parseFrontmatter(content);
-      const termMatches =
-        terms.length > 0
-          ? countTermMatches(content, terms)
-          : info.rgMatch
-            ? 1
-            : 0;
+      const termMatches = terms.length > 0 ? countTermMatches(content, terms) : info.rgMatch ? 1 : 0;
 
       const score = scoreCandidate({
         rgMatch: info.rgMatch,
@@ -281,9 +299,7 @@ export async function runSearch(input: {
 
   const lines = [`## Results for "${query}" (${results.length} matches)\n`];
   if (crossCategoryFallback) {
-    lines.push(
-      `_No results in **${category}/** — showing matches from all categories:_\n`,
-    );
+    lines.push(`_No results in **${category}/** — showing matches from all categories:_\n`);
   }
   if (terms.length > 1) {
     lines.push(`_Searching for: ${terms.join(", ")}_\n`);
@@ -296,45 +312,33 @@ export async function runSearch(input: {
   const MAX_RESULTS = 7;
 
   for (const [i, r] of topResults.slice(0, MAX_RESULTS).entries()) {
-    const isDirectHit =
-      r.rgMatch &&
-      r.ragScore !== undefined &&
-      r.ragScore > 0.4 &&
-      r.termMatches === terms.length;
+    const isDirectHit = r.rgMatch && r.ragScore !== undefined && r.ragScore > 0.4 && r.termMatches === terms.length;
     const hitLabel = isDirectHit ? " ★ DIRECT HIT" : "";
 
     if (i < FULL_DETAIL_COUNT) {
-      lines.push(
-        `${i + 1}. **${r.path}** [${r.meta.importance || "medium"}]${hitLabel}`,
-      );
+      lines.push(`${i + 1}. **${r.path}** [${r.meta.importance || "medium"}]${hitLabel}`);
       if (r.meta.tags?.length) lines.push(`   Tags: ${r.meta.tags.join(", ")}`);
       if (r.meta.summary) lines.push(`   ${r.meta.summary}`);
       const sources: string[] = [];
       if (r.rgMatch) {
-        const termInfo =
-          terms.length > 1 ? ` (${r.termMatches}/${terms.length} terms)` : "";
+        const termInfo = terms.length > 1 ? ` (${r.termMatches}/${terms.length} terms)` : "";
         sources.push(`keyword${termInfo}`);
       }
       if (r.ragScore) sources.push(`semantic: ${r.ragScore.toFixed(2)}`);
       lines.push(`   Match: ${sources.join(" + ")} | score: ${r.score.toFixed(2)}`);
-      if (r.meta.related?.length)
-        lines.push(`   Related: ${r.meta.related.join(", ")}`);
+      if (r.meta.related?.length) lines.push(`   Related: ${r.meta.related.join(", ")}`);
       if (r.ragText) {
         lines.push(`   Preview: "...${r.ragText.slice(0, 200).trim()}..."`);
       }
     } else {
       const summary = r.meta.summary ? ` — ${r.meta.summary}` : "";
-      lines.push(
-        `${i + 1}. **${r.path}** [${r.meta.importance || "medium"}]${summary}`,
-      );
+      lines.push(`${i + 1}. **${r.path}** [${r.meta.importance || "medium"}]${summary}`);
     }
     lines.push("");
   }
 
   if (topResults.length > 0) {
-    lines.push(
-      `_Read the top result: \`~/opencode-memory/${topResults[0].path}\`_`,
-    );
+    lines.push(`_Read the top result: \`${formatMemoryPathForDisplay(memoryDir, topResults[0].path)}\`_`);
     lines.push("");
   }
 
@@ -353,7 +357,7 @@ export async function runSearch(input: {
   const verified: string[] = [];
   for (const rel of relatedSuggestions) {
     try {
-      if (await Bun.file(`${memoryDir}/${rel}`).exists()) verified.push(rel);
+      if (await Bun.file(posix.join(memoryDir, rel)).exists()) verified.push(rel);
     } catch {
       // ignore — file doesn't exist
     }
@@ -362,7 +366,7 @@ export async function runSearch(input: {
   if (verified.length > 0) {
     lines.push("---");
     lines.push(
-      "**Related files** (not in results — use the Read tool on ~/opencode-memory/{path}):",
+      `**Related files** (not in results — use the Read tool on ${formatMemoryPathForDisplay(memoryDir, "{path}")}):`,
     );
     for (const rel of verified) {
       lines.push(`  - ${rel}`);
@@ -374,16 +378,12 @@ export async function runSearch(input: {
 }
 
 export const list: ToolDefinition = tool({
-  description:
-    "Browse memories in ~/opencode-memory/. Without a category, lists all categories with file counts. " +
-    "With a category, lists files in that category with their summaries.",
+  description: memoryListDescription(),
   args: {
     category: tool.schema
       .string()
       .optional()
-      .describe(
-        "Category to list: preferences, repos, technical, people, workflows, snippets, notes",
-      ),
+      .describe("Category to list: preferences, repos, technical, people, workflows, snippets, notes"),
   },
   async execute({ category }) {
     return runList({ category });
@@ -401,7 +401,7 @@ export async function runList(input: { category?: string }): Promise<string> {
       let count = 0;
       try {
         for await (const _ of glob.scan({
-          cwd: `${memoryDir}/${cat}`,
+          cwd: posix.join(memoryDir, cat),
           dot: false,
         })) {
           count++;
@@ -414,7 +414,7 @@ export async function runList(input: { category?: string }): Promise<string> {
     return lines.join("\n");
   }
 
-  const catDir = `${memoryDir}/${category}`;
+  const catDir = posix.join(memoryDir, category);
   const glob = new Bun.Glob("**/*.md");
   const files: Array<{
     path: string;
@@ -427,7 +427,7 @@ export async function runList(input: { category?: string }): Promise<string> {
   try {
     for await (const f of glob.scan({ cwd: catDir, dot: false })) {
       try {
-        const content = await Bun.file(`${catDir}/${f}`).text();
+        const content = await Bun.file(posix.join(catDir, f)).text();
         const { meta } = parseFrontmatter(content);
         files.push({
           path: `${category}/${f}`,
@@ -452,9 +452,7 @@ export async function runList(input: { category?: string }): Promise<string> {
 
   const lines = [`## ${category}/ (${files.length} files)\n`];
   for (const f of files) {
-    lines.push(
-      `- **${f.path}** [${f.importance}] ${f.updated ? `(${f.updated})` : ""}`,
-    );
+    lines.push(`- **${f.path}** [${f.importance}] ${f.updated ? `(${f.updated})` : ""}`);
     if (f.summary) lines.push(`  ${f.summary}`);
   }
   return lines.join("\n");
@@ -467,11 +465,7 @@ export const access: ToolDefinition = tool({
     "that you actually used to inform your work — not for casual browsing.\n\n" +
     "This helps the memory system track which memories are actively useful vs. stale.",
   args: {
-    path: tool.schema
-      .string()
-      .describe(
-        "Relative path within ~/opencode-memory/ (e.g. 'technical/build-tooling.md')",
-      ),
+    path: tool.schema.string().describe(memoryAccessPathDescription()),
   },
   async execute({ path }) {
     return runAccess({ path });
@@ -481,7 +475,7 @@ export const access: ToolDefinition = tool({
 export async function runAccess(input: { path: string }): Promise<string> {
   const memoryDir = resolveMemoryDir();
   const { path } = input;
-  const filePath = `${memoryDir}/${path}`;
+  const filePath = posix.join(memoryDir, path);
   try {
     const content = await Bun.file(filePath).text();
     const fmMatch = content.match(/^---\n([\s\S]*?)\n---\n?([\s\S]*)$/);
@@ -500,35 +494,7 @@ export async function runAccess(input: { path: string }): Promise<string> {
 }
 
 export const save: ToolDefinition = tool({
-  description:
-    "Commit and re-index all pending memory changes. " +
-    "Call AFTER using Write/Edit tools on ~/opencode-memory/{category}/{filename}.md. " +
-    "Handles: git add -A, commit (message derived from changed files), RAG re-indexing.\n\n" +
-    "WHEN TO SAVE (always save when you discover something reusable):\n" +
-    "- Learned a non-obvious API pattern, tool quirk, or workaround\n" +
-    "- Discovered repo structure, conventions, or gotchas that future sessions would benefit from\n" +
-    "- Found external tool usage patterns that weren't documented\n" +
-    "- Resolved a tricky debugging problem with a non-obvious root cause\n" +
-    "- Learned team/ownership/contact information not easily found elsewhere\n" +
-    "DO NOT save: one-off answers, things in public docs, or context only relevant to the current task\n\n" +
-    "WORKFLOW:\n" +
-    "1. memory_search first — check if a file already exists to update\n" +
-    "2. Write/Edit files at ~/opencode-memory/{category}/{filename}.md\n" +
-    "3. Call this tool to sync all changes\n\n" +
-    "REPO NOTES: for repository-related memory, use the path structure\n" +
-    "`repos/{host}/{org}/{repo}.md` — e.g. `repos/github.com/user/project.md`.\n" +
-    "This makes it easy to find later by repo URL fragments.\n\n" +
-    "CATEGORIES: preferences, repos, technical, people, workflows, snippets, notes\n\n" +
-    "FRONTMATTER FORMAT (include at top of file):\n" +
-    "---\n" +
-    "title: Human-readable title\n" +
-    "tags: [tag1, tag2]\n" +
-    "summary: One-line summary\n" +
-    "created: YYYY-MM-DD\n" +
-    "updated: YYYY-MM-DD\n" +
-    "importance: high | medium | low\n" +
-    "related: [category/file.md]\n" +
-    "---",
+  description: memorySaveDescription(),
   args: {},
   async execute() {
     return runSave();
@@ -542,9 +508,7 @@ export async function runSave(): Promise<string> {
 
   try {
     await Bun.$`git -C ${memoryDir} add -A`.quiet();
-    const diff = await Bun.$`git -C ${memoryDir} diff --name-only --cached`
-      .text()
-      .catch(() => "");
+    const diff = await Bun.$`git -C ${memoryDir} diff --name-only --cached`.text().catch(() => "");
     changed = diff.trim().split("\n").filter(Boolean);
 
     if (changed.length === 0) {

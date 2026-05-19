@@ -8,7 +8,9 @@
  * layer this plugin on top of their own config without surprises.
  */
 
-import { resolveMemoryDir } from "./lib/paths";
+import { posix } from "node:path";
+import { DEFAULT_MEMORY_SUBDIR } from "./constants";
+import { formatMemoryDirForDisplay, normalizeDirPath, resolveMemoryDir } from "./lib/paths";
 
 /**
  * The snippet appended to subagent prompts. Captured in one place so
@@ -21,11 +23,13 @@ import { resolveMemoryDir } from "./lib/paths";
  * the search work. They're scoped tight enough not to crowd out the
  * memory bits but useful enough to ship as opinionated defaults.
  */
-export const MEMORY_PROMPT_APPENDIX = `## Memory & Sessions
+export function buildMemoryPromptAppendix(memoryDir = `~/${DEFAULT_MEMORY_SUBDIR}`): string {
+  const memoryRoot = formatMemoryDirForDisplay(memoryDir);
+  return `## Memory & Sessions
 
 1. **Before work:** call \`memory_search\` and \`session_search\` with your topic. Read results — don't just glance at summaries.
 2. **When something is unfamiliar mid-task** (tool, API, pattern, build system): search both \`memory_search\` and \`session_search\` BEFORE attempting. Use previous sessions to inform your approach — don't try first, search first.
-3. **When you discover something reusable:** write to ~/opencode-memory/{category}/{filename}.md and \`memory_save\` immediately. Never defer, never ask.
+3. **When you discover something reusable:** write to ${memoryRoot}/{category}/{filename}.md and \`memory_save\` immediately. Never defer, never ask.
 
 If you can't write to memory, end your response with:
 ## Discoveries worth saving
@@ -42,18 +46,15 @@ End with: a clear conclusion (recommendation, diagnosis, or finding), your confi
 ## Source age
 
 Flag anything > 1 year old as potentially stale.`;
+}
+
+export const MEMORY_PROMPT_APPENDIX = buildMemoryPromptAppendix();
 
 /**
  * Subagents that should get the memory prompt appendix. These are the
  * built-in subagent names used by OpenCode — custom agents are left alone.
  */
-export const TARGET_AGENTS = [
-  "general",
-  "explore",
-  "research",
-  "review",
-  "investigator",
-] as const;
+export const TARGET_AGENTS = ["general", "explore", "research", "review", "investigator"] as const;
 
 /**
  * Explore needs explicit permission to call memory_search/session_search
@@ -82,10 +83,7 @@ interface ConfigLike {
  * separately from the plugin entry so tests can feed a plain object in
  * and assert on the result without constructing a full plugin context.
  */
-export function applyConfig(
-  config: ConfigLike,
-  options: { skillsDir?: string; memoryDir?: string },
-): void {
+export function applyConfig(config: ConfigLike, options: { skillsDir?: string; memoryDir?: string }): void {
   // --- skills.paths — register the bundled skill ---
   if (options.skillsDir) {
     config.skills = config.skills || {};
@@ -96,7 +94,8 @@ export function applyConfig(
   }
 
   // --- permission rules — allow the tools to touch the memory dir ---
-  const memoryGlob = `${options.memoryDir ?? resolveMemoryDir()}/**`;
+  const memoryDir = normalizeDirPath(options.memoryDir ?? resolveMemoryDir());
+  const memoryGlob = posix.join(memoryDir, "**");
   config.permission = config.permission || {};
 
   if (typeof config.permission.edit !== "string") {
@@ -106,8 +105,7 @@ export function applyConfig(
     }
   }
   if (typeof config.permission.external_directory !== "string") {
-    const ext = (config.permission.external_directory =
-      config.permission.external_directory || {});
+    const ext = (config.permission.external_directory = config.permission.external_directory || {});
     if (typeof ext === "object" && ext && !(memoryGlob in ext)) {
       (ext as Record<string, string>)[memoryGlob] = "allow";
     }
@@ -115,12 +113,12 @@ export function applyConfig(
 
   // --- agent prompts — prepend the memory/session expectations ---
   config.agent = config.agent || {};
+  const prefix = buildMemoryPromptAppendix(memoryDir);
   for (const name of TARGET_AGENTS) {
     const existing = (config.agent[name] || {}) as {
       prompt?: string;
       permission?: Record<string, unknown>;
     };
-    const prefix = MEMORY_PROMPT_APPENDIX;
 
     if (!existing.prompt) {
       existing.prompt = prefix;
@@ -130,7 +128,10 @@ export function applyConfig(
 
     // Explore in particular needs its tool permissions opened.
     if (name === "explore") {
-      existing.permission = { ...EXPLORE_PERMISSIONS, ...(existing.permission || {}) };
+      existing.permission = {
+        ...EXPLORE_PERMISSIONS,
+        ...(existing.permission || {}),
+      };
     } else {
       existing.permission = existing.permission || {};
       const p = existing.permission as {
