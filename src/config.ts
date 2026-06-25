@@ -51,8 +51,23 @@ Flag anything > 1 year old as potentially stale.`;
 export const MEMORY_PROMPT_APPENDIX = buildMemoryPromptAppendix();
 
 /**
- * Subagents that should get the memory prompt appendix. These are the
- * built-in subagent names used by OpenCode — custom agents are left alone.
+ * OpenCode's real built-in subagents. These are NOT present in the raw
+ * config object at config-hook time, so we create entries for them in order
+ * to attach the memory prompt. Keep this list in sync with OpenCode core
+ * (`packages/opencode/src/agent/agent.ts` — built-in subagents are `general`
+ * and `explore`; `build`/`plan` are primary and are intentionally excluded).
+ */
+export const BUILTIN_SUBAGENTS = ["general", "explore"] as const;
+
+/**
+ * Subagents that should get the memory prompt appendix.
+ *
+ * Built-ins (see {@link BUILTIN_SUBAGENTS}) are always targeted. Any other
+ * name here is only touched when the user has *already defined* an agent with
+ * that name — we never fabricate an agent that doesn't exist. This is what
+ * keeps `research`/`review`/`investigator` from being conjured into the
+ * config (and showing up as phantom entries in the Task tool's agent list)
+ * on installs that never defined them.
  */
 export const TARGET_AGENTS = ["general", "explore", "research", "review", "investigator"] as const;
 
@@ -114,7 +129,13 @@ export function applyConfig(config: ConfigLike, options: { skillsDir?: string; m
   // --- agent prompts — prepend the memory/session expectations ---
   config.agent = config.agent || {};
   const prefix = buildMemoryPromptAppendix(memoryDir);
+  const builtins = BUILTIN_SUBAGENTS as readonly string[];
   for (const name of TARGET_AGENTS) {
+    // Only touch real built-ins (which we create) or agents the user has
+    // already defined. Never fabricate an agent that doesn't exist.
+    const alreadyDefined = Object.prototype.hasOwnProperty.call(config.agent, name);
+    if (!alreadyDefined && !builtins.includes(name)) continue;
+
     const existing = (config.agent[name] || {}) as {
       prompt?: string;
       permission?: Record<string, unknown>;

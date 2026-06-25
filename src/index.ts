@@ -89,7 +89,7 @@ export default {
 };
 
 // Re-exports for power users who want to wire pieces into their own plugin.
-export { applyConfig, MEMORY_PROMPT_APPENDIX, TARGET_AGENTS } from "./config";
+export { applyConfig, BUILTIN_SUBAGENTS, MEMORY_PROMPT_APPENDIX, TARGET_AGENTS } from "./config";
 export {
   afterToolUpdate,
   buildCompactionContext,

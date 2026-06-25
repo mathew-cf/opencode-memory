@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import {
   applyConfig,
   buildMemoryPromptAppendix,
+  BUILTIN_SUBAGENTS,
   EXPLORE_PERMISSIONS,
   MEMORY_PROMPT_APPENDIX,
   TARGET_AGENTS,
@@ -70,16 +71,42 @@ describe("applyConfig", () => {
     expect(perm?.edit?.["/home/u/opencode-memory/**"]).toBe("deny");
   });
 
-  test("sets the memory prompt on each target agent using the configured directory", () => {
+  test("sets the memory prompt on the built-in subagents using the configured directory", () => {
     const config: Record<string, unknown> = {};
     const memoryDir = "/home/u/.config/opencode/memory";
     applyConfig(config, { memoryDir });
     const agent = (config as { agent?: Record<string, { prompt?: string }> }).agent;
-    for (const name of TARGET_AGENTS) {
+    for (const name of BUILTIN_SUBAGENTS) {
       expect(agent?.[name]?.prompt).toBe(buildMemoryPromptAppendix(memoryDir));
       expect(agent?.[name]?.prompt).toContain("/home/u/.config/opencode/memory/{category}/{filename}.md");
       expect(agent?.[name]?.prompt).not.toContain("~/opencode-memory");
     }
+  });
+
+  test("does not fabricate non-built-in target agents that the user never defined", () => {
+    const config: Record<string, unknown> = {};
+    applyConfig(config, { memoryDir: "/home/u/opencode-memory" });
+    const agent = (config as { agent?: Record<string, unknown> }).agent ?? {};
+    // Only the real built-ins should exist; research/review/investigator must not.
+    expect(Object.keys(agent).sort()).toEqual([...BUILTIN_SUBAGENTS].sort());
+    for (const name of TARGET_AGENTS) {
+      if (!(BUILTIN_SUBAGENTS as readonly string[]).includes(name)) {
+        expect(name in agent).toBe(false);
+      }
+    }
+  });
+
+  test("augments a non-built-in target agent only when the user has already defined it", () => {
+    const config: Record<string, unknown> = {
+      agent: { research: { prompt: "find things" } },
+    };
+    applyConfig(config, { memoryDir: "/home/u/opencode-memory" });
+    const agent = (config as { agent?: Record<string, { prompt?: string }> }).agent;
+    expect(agent?.research?.prompt).toContain("find things");
+    expect(agent?.research?.prompt).toContain("memory_search");
+    // Still must not fabricate the other non-built-ins.
+    expect("review" in (agent ?? {})).toBe(false);
+    expect("investigator" in (agent ?? {})).toBe(false);
   });
 
   test("prepends to existing agent prompts without clobbering them", () => {
