@@ -46,7 +46,7 @@
     "persistence"
   ],
   "dependencies": {
-    "@mathew-cf/rag-cli": "^0.4.0",
+    "@mathew-cf/rag-cli": "^1.1.0",
     "@vscode/ripgrep": "^1.17.1",
     "zod": "^3.25.0"
   },
