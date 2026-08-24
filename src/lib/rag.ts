@@ -40,6 +40,25 @@ export interface RagStatus {
  */
 export function resolveRagBinary(): string | null {
   try {
+    // Prefer the platform binary directly. On Windows, Bun cannot exec
+    // a .js shim via CreateProcess, so resolving the binary avoids a
+    // silent "Executable not found in $PATH" error.
+    try {
+      const platform = require("@mathew-cf/rag-cli/src/platform") as {
+        platformKey(p: string, a: string): string;
+        isSupported(key: string): boolean;
+        subpackageName(key: string): string;
+        binaryFilename(p: string): string;
+      };
+      const key = platform.platformKey(process.platform, process.arch);
+      if (platform.isSupported(key)) {
+        return require.resolve(
+          `${platform.subpackageName(key)}/bin/${platform.binaryFilename(process.platform)}`,
+        );
+      }
+    } catch {
+      // Fall through to the JS shim.
+    }
     return require.resolve("@mathew-cf/rag-cli/bin/rag.js");
   } catch {
     return null;
@@ -74,7 +93,7 @@ export function installGuidance(): string {
     "",
     "Usually this means one of:",
     "  - Your host platform isn't covered by the prebuilt binaries",
-    "    (supported: macOS ARM64/x64, Linux x64/ARM64).",
+    "    (supported: macOS ARM64/x64, Linux x64/ARM64, Windows x64).",
     "  - `npm install` or the equivalent plugin install skipped",
     "    optionalDependencies.",
     "",
@@ -104,6 +123,10 @@ export async function ragSearch(args: {
   if (!shim) return "";
   const k = String(args.topK ?? 15);
   return Bun.$`${shim} search ${args.query} -i ${args.indexDir} -k ${k} --json`
+    .env({
+      ...process.env,
+      HOME: process.env.HOME || process.env.USERPROFILE,
+    })
     .text()
     .catch(() => "");
 }
@@ -125,6 +148,10 @@ export function spawnRagIndex(args: {
   Bun.spawn([shim, "index", args.memoryDir, "-o", args.indexDir], {
     stdout: "ignore",
     stderr: "ignore",
+    env: {
+      ...process.env,
+      HOME: process.env.HOME || process.env.USERPROFILE,
+    },
   });
   return true;
 }
@@ -139,7 +166,12 @@ export async function downloadModel(): Promise<string> {
   if (!shim) return installGuidance();
 
   try {
-    const out = await Bun.$`${shim} download`.text();
+    const out = await Bun.$`${shim} download`
+      .env({
+        ...process.env,
+        HOME: process.env.HOME || process.env.USERPROFILE,
+      })
+      .text();
     return out.trim() || "Model downloaded.";
   } catch (err) {
     return `rag download failed: ${String(err)}`;

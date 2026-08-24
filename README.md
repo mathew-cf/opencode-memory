@@ -52,7 +52,7 @@ The plugin also auto-registers (OpenCode only):
 | **Keyword (ripgrep)**  | `@vscode/ripgrep`           | Exact-match + phrase lookup over files |
 | **Semantic (rag-cli)** | `@mathew-cf/rag-cli`        | Similarity search via local embeddings |
 
-Both are declared as **required dependencies**: installing the plugin pulls in prebuilt binaries for your platform automatically (macOS ARM64/x64, Linux x64/ARM64; ripgrep additionally covers Windows and FreeBSD). No Rust toolchain, no `brew install`, no `$PATH` plumbing.
+Both are declared as **required dependencies**: installing the plugin pulls in prebuilt binaries for your platform automatically (macOS ARM64/x64, Linux x64/ARM64, Windows x64). ripgrep additionally covers Windows and FreeBSD. No Rust toolchain, no `brew install`, no `$PATH` plumbing.
 
 Pre-cache the embedding model once (~90MB) to make the first semantic search instant:
 
