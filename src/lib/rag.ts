@@ -95,6 +95,64 @@ export function installGuidance(): string {
  * parse error upstream) resolves to the empty string — degrading
  * gracefully rather than propagating shell exceptions.
  */
+export interface RagCommandResult {
+  exitCode: number;
+  stdout: string;
+  stderr: string;
+}
+
+export type RagCommandRunner = (argv: string[]) => Promise<RagCommandResult>;
+
+async function runRagCommand(argv: string[]): Promise<RagCommandResult> {
+  const process = Bun.spawn(argv, { stdout: "pipe", stderr: "pipe" });
+  const [exitCode, stdout, stderr] = await Promise.all([
+    process.exited,
+    new Response(process.stdout).text(),
+    new Response(process.stderr).text(),
+  ]);
+  return { exitCode, stdout, stderr };
+}
+
+function groupBySourceUnsupported(stderr: string): boolean {
+  return (
+    stderr.includes("--group-by-source") &&
+    /unexpected argument|unknown (?:argument|option)|unrecognized option/i.test(stderr)
+  );
+}
+
+/**
+ * Execute a semantic search with source diversification. Exported with an
+ * injectable runner so compatibility behavior can be tested without spawning
+ * the installed binary.
+ */
+export async function runRagSearch(
+  shim: string,
+  args: { query: string; indexDir: string; topK?: number },
+  runner: RagCommandRunner = runRagCommand,
+): Promise<string> {
+  const base = [
+    shim,
+    "search",
+    args.query,
+    "-i",
+    args.indexDir,
+    "-k",
+    String(args.topK ?? 15),
+    "--json",
+  ];
+  const grouped = await runner([...base, "--group-by-source"]);
+  if (grouped.exitCode === 0) return grouped.stdout;
+
+  // rag-cli releases before --group-by-source should remain usable. Retry
+  // only the specific CLI-argument failure; real search failures still degrade
+  // normally instead of doing duplicate work.
+  if (groupBySourceUnsupported(grouped.stderr)) {
+    const legacy = await runner(base);
+    if (legacy.exitCode === 0) return legacy.stdout;
+  }
+  return "";
+}
+
 export async function ragSearch(args: {
   query: string;
   indexDir: string;
@@ -102,10 +160,7 @@ export async function ragSearch(args: {
 }): Promise<string> {
   const shim = resolveRagBinary();
   if (!shim) return "";
-  const k = String(args.topK ?? 15);
-  return Bun.$`${shim} search ${args.query} -i ${args.indexDir} -k ${k} --json`
-    .text()
-    .catch(() => "");
+  return runRagSearch(shim, args).catch(() => "");
 }
 
 /**

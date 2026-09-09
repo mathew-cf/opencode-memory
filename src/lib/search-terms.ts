@@ -13,6 +13,7 @@ import { STOP_WORDS } from "../constants";
  * - Quoted phrases become a single term (with the quotes stripped).
  * - Whitespace-separated words become individual terms.
  * - Very short words (<2 chars) and common stop words are filtered out.
+ * - Duplicate terms are removed case-insensitively, preserving first-seen order.
  *
  * The original casing is preserved in the return value; downstream callers
  * lowercase when they need to compare. That's intentional: a future ranker
@@ -20,6 +21,7 @@ import { STOP_WORDS } from "../constants";
  */
 export function parseSearchTerms(query: string): string[] {
   const terms: string[] = [];
+  const seen = new Set<string>();
   // Match quoted phrases or individual words
   const regex = /"([^"]+)"|(\S+)/g;
   let match: RegExpExecArray | null;
@@ -28,7 +30,8 @@ export function parseSearchTerms(query: string): string[] {
     const lower = original.toLowerCase();
     // Skip very short terms and common words
     if (lower.length < 2) continue;
-    if (STOP_WORDS.has(lower)) continue;
+    if (STOP_WORDS.has(lower) || seen.has(lower)) continue;
+    seen.add(lower);
     terms.push(original);
   }
   return terms;

@@ -12,10 +12,14 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
+  centerSnippet,
+  escapeLikeTerm,
   likeOr,
+  normalizeSessionInteger,
   runSessionList,
   runSessionRead,
   runSessionSearch,
+  sessionTermHits,
   termHits,
 } from "../src/tools/session";
 import { sqlStr } from "../src/lib/db";
@@ -36,12 +40,12 @@ describe("likeOr", () => {
   });
 
   test("returns a bare expression for one pattern", () => {
-    expect(likeOr("col", ["%x%"])).toBe("col LIKE '%x%'");
+    expect(likeOr("col", ["%x%"])).toBe("col LIKE '%x%' ESCAPE '\\'");
   });
 
   test("returns a parenthesized OR for multiple patterns", () => {
     expect(likeOr("col", ["%a%", "%b%"])).toBe(
-      "(col LIKE '%a%' OR col LIKE '%b%')",
+      "(col LIKE '%a%' ESCAPE '\\' OR col LIKE '%b%' ESCAPE '\\')",
     );
   });
 });
@@ -51,8 +55,41 @@ describe("termHits", () => {
     expect(termHits("col", [])).toBe("0");
     expect(termHits("col", ["%a%"])).toBe("1");
     expect(termHits("col", ["%a%", "%b%"])).toBe(
-      "(col LIKE '%a%') + (col LIKE '%b%')",
+      "(col LIKE '%a%' ESCAPE '\\') + (col LIKE '%b%' ESCAPE '\\')",
     );
+  });
+
+  test("builds session-wide distinct-term checks", () => {
+    const sql = sessionTermHits("s.title", "s.id", "ranked", ["%a%", "%b%"]);
+    expect(sql).toContain("s.title LIKE '%a%'");
+    expect(sql).toContain("h.session_id = s.id");
+    expect(sql).toContain("h.text LIKE '%b%'");
+  });
+});
+
+describe("escapeLikeTerm", () => {
+  test("makes SQL LIKE metacharacters literal", () => {
+    expect(escapeLikeTerm("50%_done\\later")).toBe("50\\%\\_done\\\\later");
+  });
+});
+
+describe("centerSnippet", () => {
+  test("centers around the earliest match regardless of query-term order", () => {
+    const text = `${"x".repeat(130)}early${"y".repeat(80)}later${"z".repeat(80)}`;
+    const snippet = centerSnippet(text, ["later", "early"], 100);
+    expect(snippet).toContain("early");
+    expect(snippet).not.toContain("later");
+    expect(snippet.startsWith("…")).toBe(true);
+  });
+});
+
+describe("normalizeSessionInteger", () => {
+  test("defaults non-finite values and truncates/clamps finite values", () => {
+    expect(normalizeSessionInteger(Number.NaN, 20, 1, 100)).toBe(20);
+    expect(normalizeSessionInteger(Number.POSITIVE_INFINITY, 20, 1, 100)).toBe(20);
+    expect(normalizeSessionInteger(-4, 20, 1, 100)).toBe(1);
+    expect(normalizeSessionInteger(12.9, 20, 1, 100)).toBe(12);
+    expect(normalizeSessionInteger(1_000, 20, 1, 100)).toBe(100);
   });
 });
 
@@ -121,15 +158,23 @@ async function initDb() {
     `INSERT INTO message VALUES ('m4','ses-b',${t2 + 100},'{"role":"assistant"}');`,
     `INSERT INTO part VALUES ('p4','m4','ses-b',${t2 + 100},'{"type":"text","text":"use exponential backoff"}');`,
 
-    // Session C: body mentions both "retry" and "jitter" — should rank first for multi-term queries.
+    // Session C: the strongest representative is its second matching part.
     `INSERT INTO session VALUES ('ses-c','p','c','Implementation','/tmp/projB',NULL,${t3},${t3 + 500},NULL);`,
     `INSERT INTO message VALUES ('m5','ses-c',${t3},'{"role":"user"}');`,
-    `INSERT INTO part VALUES ('p5','m5','ses-c',${t3},'{"type":"text","text":"lets add retry with jitter"}');`,
+    `INSERT INTO part VALUES ('p5','m5','ses-c',${t3},'{"type":"text","text":"lets add retry"}');`,
+    `INSERT INTO message VALUES ('m7','ses-c',${t3 + 100},'{"role":"assistant"}');`,
+    `INSERT INTO part VALUES ('p7','m7','ses-c',${t3 + 100},'{"type":"text","text":"BEGIN-OF-LONG-PART ${"x".repeat(140)} jitter and retry end"}');`,
 
     // Session D: archived — should never appear.
     `INSERT INTO session VALUES ('ses-d','p','d','Archived discussion','/tmp/projB',NULL,${t4},${t4 + 500},${t4 + 600});`,
     `INSERT INTO message VALUES ('m6','ses-d',${t4},'{"role":"user"}');`,
     `INSERT INTO part VALUES ('p6','m6','ses-d',${t4},'{"type":"text","text":"this is hidden: retry jitter"}');`,
+
+    // Archived only to keep it out of list/search fixtures; session_read can
+    // still exercise continuation within one oversized historical message.
+    `INSERT INTO session VALUES ('ses-long','p','long','Long message','/tmp/projLong',NULL,${t4 + 1_000},${t4 + 1_500},${t4 + 2_000});`,
+    `INSERT INTO message VALUES ('m-long','ses-long',${t4 + 1_000},'{"role":"assistant"}');`,
+    `INSERT INTO part VALUES ('p-long','m-long','ses-long',${t4 + 1_000},'{"type":"text","text":"${"x".repeat(15_999)}🌍tail"}');`,
   ];
 
   for (const sql of inserts) {
@@ -187,6 +232,12 @@ describe("runSessionList", () => {
     expect(out).toContain("No sessions found");
     expect(out).toContain("2099-01-01");
   });
+
+  test("normalizes and clamps list limits", async () => {
+    expect(await runSessionList({ limit: Number.NaN })).toContain("Found 3 session(s)");
+    expect(await runSessionList({ limit: -10 })).toContain("Found 1 session(s)");
+    expect(await runSessionList({ limit: 10_000 })).toContain("Found 3 session(s)");
+  });
 });
 
 describe("runSessionSearch", () => {
@@ -214,9 +265,38 @@ describe("runSessionSearch", () => {
     if (bIdx > -1) expect(cIdx).toBeLessThan(bIdx);
   });
 
+  test("counts distinct terms across different messages session-wide", async () => {
+    const out = await runSessionSearch({ query: "good hello" });
+    expect(out).toContain("ses-a");
+    expect(out).toContain("(2/2 terms)");
+    expect(out).toContain('session_read(session_id="ses-a", offset=0)');
+  });
+
+  test("uses the best matching part and centers its snippet on the earliest match", async () => {
+    const out = await runSessionSearch({ query: "retry jitter" });
+    expect(out).toContain('session_read(session_id="ses-c", offset=1)');
+    expect(out).toContain("jitter and retry");
+  });
+
   test("archived sessions are excluded from search", async () => {
     const out = await runSessionSearch({ query: "jitter" });
     expect(out).not.toContain("ses-d");
+  });
+
+  test("preserves literal fallback searches filtered by the memory term parser", async () => {
+    expect(await runSessionSearch({ query: "C" })).toContain("session(s) matching");
+    expect(await runSessionSearch({ query: "the" })).toContain("ses-a");
+  });
+
+  test("treats SQL LIKE metacharacters literally", async () => {
+    expect(await runSessionSearch({ query: "retry_" })).toContain('No sessions found matching "retry_"');
+    expect(await runSessionSearch({ query: "retry%" })).toContain('No sessions found matching "retry%"');
+  });
+
+  test("normalizes invalid and oversized limits", async () => {
+    expect(await runSessionSearch({ query: "retry", limit: Number.NaN })).toContain("session(s) matching");
+    expect(await runSessionSearch({ query: "retry", limit: -1 })).toContain("1 session(s) matching");
+    expect(await runSessionSearch({ query: "retry", limit: 10_000 })).toContain("session(s) matching");
   });
 
   test("returns a friendly message for empty query", async () => {
@@ -256,6 +336,47 @@ describe("runSessionRead", () => {
     });
     expect(out).toContain("hello there");
     expect(out).not.toContain("good morning");
+  });
+
+  test("normalizes and clamps read limit and offset", async () => {
+    const clamped = await runSessionRead({ sessionId: "ses-a", limit: -5, offset: -20 });
+    expect(clamped).toContain("good morning");
+    expect(clamped).not.toContain("hello there");
+    expect(clamped).toContain("use offset=1 to continue");
+
+    const defaults = await runSessionRead({
+      sessionId: "ses-a",
+      limit: Number.NaN,
+      offset: Number.POSITIVE_INFINITY,
+    });
+    expect(defaults).toContain("good morning");
+    expect(defaults).toContain("hello there");
+  });
+
+  test("bounds oversized messages and continues at a UTF-safe character offset", async () => {
+    const first = await runSessionRead({ sessionId: "ses-long" });
+    expect(first.length).toBeLessThan(16_500);
+    expect(first).not.toContain("🌍");
+    expect(first).not.toContain("�");
+    expect(first).toContain("message_char_offset=15999");
+
+    const continuation = await runSessionRead({
+      sessionId: "ses-long",
+      offset: 0,
+      messageCharOffset: 15_999,
+    });
+    expect(continuation).toContain("🌍tail");
+    expect(continuation).not.toContain("�");
+    expect(continuation).toContain("end of session");
+
+    // An offset in the middle of the surrogate pair is moved back to its
+    // code-point boundary rather than emitting U+FFFD or dropping content.
+    const unsafeInput = await runSessionRead({
+      sessionId: "ses-long",
+      messageCharOffset: 16_000,
+    });
+    expect(unsafeInput).toContain("🌍tail");
+    expect(unsafeInput).not.toContain("�");
   });
 
   test("reports when session is missing", async () => {

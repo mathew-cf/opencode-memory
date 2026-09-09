@@ -37,6 +37,13 @@ describe("parseSearchTerms", () => {
   test("preserves original casing", () => {
     expect(parseSearchTerms("SQL Query")).toEqual(["SQL", "Query"]);
   });
+
+  test("deduplicates terms case-insensitively", () => {
+    expect(parseSearchTerms('Retry retry RETRY "error path" "ERROR PATH"')).toEqual([
+      "Retry",
+      "error path",
+    ]);
+  });
 });
 
 describe("countTermMatches", () => {

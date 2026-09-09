@@ -27,8 +27,8 @@ export function buildMemoryPromptAppendix(memoryDir = `~/${DEFAULT_MEMORY_SUBDIR
   const memoryRoot = formatMemoryDirForDisplay(memoryDir);
   return `## Memory & Sessions
 
-1. **Before work:** call \`memory_search\` and \`session_search\` with your topic. Read results — don't just glance at summaries.
-2. **When something is unfamiliar mid-task** (tool, API, pattern, build system): search both \`memory_search\` and \`session_search\` BEFORE attempting. Use previous sessions to inform your approach — don't try first, search first.
+1. **Search once per unfamiliar durable topic:** call \`memory_search\` and \`session_search\` before substantial work when current context does not already contain relevant evidence. Use \`memory_read\` for bounded follow-up. Reuse loaded results for follow-up requests; do not repeat the bootstrap ritual merely because the user sent another message.
+2. **Search again when the topic materially changes, after compaction, or when stuck:** use previous sessions to inform the approach before guessing. Skip a corpus when current session state already records that its search found nothing relevant for this topic.
 3. **When you discover something reusable:** write to ${memoryRoot}/{category}/{filename}.md and \`memory_save\` immediately. Never defer, never ask.
 
 If you can't write to memory, end your response with:
@@ -77,6 +77,7 @@ export const TARGET_AGENTS = ["general", "explore", "research", "review", "inves
  */
 export const EXPLORE_PERMISSIONS: Record<string, string> = {
   memory_search: "allow",
+  memory_read: "allow",
   memory_list: "allow",
   memory_access: "allow",
   session_search: "allow",

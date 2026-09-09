@@ -13,13 +13,14 @@ The goal isn't to save everything — it's to save what took >1 minute to figure
 
 | Tool                              | Purpose                                 |
 | --------------------------------- | --------------------------------------- |
-| `memory_search(query, category?)` | Hybrid keyword + semantic search        |
+| `memory_search(query, category?, detail?)` | Compact hybrid keyword + semantic search (up to 5 results) |
+| `memory_read(path, heading?, max_chars?)` | Read bounded content and record access automatically |
 | `memory_list(category?)`          | Browse categories or list files         |
 | `memory_save()`                   | Commit + re-index after writing/editing |
 | `memory_access(path)`             | Mark a file as read & useful (bumps ranking) |
 | `memory_setup()`                  | Check `rag` install status, print guidance |
 
-Read search results with the Read tool on `~/opencode-memory/{path}`.
+Read search results with `memory_read`; use `heading` to retrieve only a relevant section. The legacy `memory_access` remains available when a memory was read through another surface.
 
 ---
 
@@ -27,7 +28,7 @@ Read search results with the Read tool on `~/opencode-memory/{path}`.
 
 ```
 START  → memory_search("what I'm working on")
-           Read relevant files; follow Related: pointers
+           memory_read relevant files or heading sections
            Verify mutable facts via live sources (not memory)
 
 DURING → Save discoveries immediately when they happen
@@ -269,7 +270,8 @@ Fix: document the target architecture as if it's already the design. If you must
 - Be specific: `memory_search("retry jitter config")` not `memory_search("retry")`
 - Multi-term = OR with ranking: `"oauth scopes"` surfaces files with both terms first
 - Filter by category: `memory_search("api-core", category="repos")`
-- Follow `Related:` pointers in results — connected knowledge is often more useful than the direct hit
+- Use `memory_read(path, heading?)` on likely matches instead of loading whole files
+- Use `detail="debug"` only when ranking diagnostics or related-file expansion is needed
 - Set `importance: high` for frequently referenced knowledge; it affects ranking
 
 ---
