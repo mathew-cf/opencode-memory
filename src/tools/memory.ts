@@ -7,14 +7,18 @@
  */
 
 import { tool, type ToolDefinition } from "@opencode-ai/plugin";
+import { Database } from "bun:sqlite";
+import { mkdirSync } from "node:fs";
+import { realpath } from "node:fs/promises";
 import { posix } from "node:path";
 import { CATEGORIES } from "../constants";
-import { bumpAccessFields, parseFrontmatter, todayISO, type FrontMatter } from "../lib/frontmatter";
+import { parseFrontmatter, todayISO, type FrontMatter } from "../lib/frontmatter";
 import {
   formatMemoryDirForDisplay,
   formatMemoryPathForDisplay,
   normPath,
   ragIndexDir,
+  resolveContainedPath,
   resolveMemoryDir,
 } from "../lib/paths";
 import { installGuidance, ragAvailable, ragSearch, resolveRagBinary, spawnRagIndex } from "../lib/rag";
@@ -22,6 +26,32 @@ import { resolveRgBinary, rgInstallGuidance } from "../lib/ripgrep";
 import { countTermMatches, parseSearchTerms, scoreCandidate } from "../lib/search-terms";
 
 // --- Internal helpers ---------------------------------------------------
+
+function validCategory(category: string | undefined): category is (typeof CATEGORIES)[number] {
+  return category !== undefined && (CATEGORIES as readonly string[]).includes(category);
+}
+
+function withAccessDatabase<T>(memoryDir: string, run: (database: Database) => T): T {
+  const indexDir = ragIndexDir(memoryDir);
+  mkdirSync(indexDir, { recursive: true });
+  const database = new Database(posix.join(indexDir, "access-telemetry.sqlite"), { create: true });
+  try {
+    database.exec("PRAGMA busy_timeout = 5000");
+    database.exec(
+      "CREATE TABLE IF NOT EXISTS memory_access (path TEXT PRIMARY KEY, access_count INTEGER NOT NULL, last_accessed TEXT NOT NULL)",
+    );
+    return run(database);
+  } finally {
+    database.close();
+  }
+}
+
+function accessCounts(memoryDir: string): Map<string, number> {
+  return withAccessDatabase(memoryDir, (database) => new Map(
+    database.query<{ path: string; access_count: number }, []>("SELECT path, access_count FROM memory_access").all()
+      .map((row) => [row.path, row.access_count]),
+  ));
+}
 
 /**
  * Build a ripgrep argument list for OR-matching multiple terms.
@@ -82,8 +112,8 @@ export function memorySearchDescription(memoryDir?: string): string {
   const memoryPath = configuredMemoryPathLabel("{path}", memoryDir);
   return (
     `Search memories in ${memoryRoot} using both keyword (rg) and semantic (rag) search. ` +
-    "Results are summaries only (path, tags, importance, short context). " +
-    `Use the Read tool on ${memoryPath} to get the full content.\n\n` +
+    "Results are concise pointers (path, importance, summary, and short evidence). " +
+    "Use memory_read on a result to retrieve only the relevant content.\n\n" +
     "Multi-term queries match files containing ANY search term (OR logic); files matching more terms rank higher. " +
     "For example, 'errors retries' finds files mentioning 'errors' OR 'retries', with files containing both ranked first.\n\n" +
     "WHEN TO SEARCH (do this BEFORE starting work):\n" +
@@ -94,9 +124,9 @@ export function memorySearchDescription(memoryDir?: string): string {
     "- Looking up a person, team, or ownership information\n" +
     "- Before writing new memory — check if a file already exists to update instead of duplicate\n\n" +
     "FOLLOW-UP SEARCHES (do when results seem incomplete):\n" +
-    `- Results include Related: files — use the Read tool on ${memoryPath} for connected knowledge\n` +
+    `- Use memory_read(path) instead of reading all of ${memoryPath}\n` +
     "- If few/no results, try broader terms or search without the category filter\n" +
-    "- Check the 'Related files' section at the bottom of results for cross-references worth exploring"
+    "- Use detail=debug only when ranking diagnostics or related-file expansion is needed"
   );
 }
 
@@ -154,12 +184,16 @@ export const search: ToolDefinition = tool({
   args: {
     query: tool.schema.string().describe("Search terms or natural language query"),
     category: tool.schema
-      .string()
+      .enum(CATEGORIES)
       .optional()
-      .describe("Filter to a specific category: preferences, repos, technical, people, workflows, snippets, notes"),
+      .describe("Filter to a specific memory category"),
+    detail: tool.schema
+      .enum(["compact", "normal", "debug"])
+      .optional()
+      .describe('Output detail: "compact", "normal" (default), or "debug" for ranking diagnostics'),
   },
-  async execute({ query, category }) {
-    return runSearch({ query, category });
+  async execute({ query, category, detail = "normal" }) {
+    return runSearch({ query, category, detail });
   },
 });
 
@@ -168,8 +202,15 @@ export const search: ToolDefinition = tool({
  * wrapper so tests can call it with plain arguments and assert against the
  * returned string without constructing a full tool context.
  */
-export async function runSearch(input: { query: string; category?: string }): Promise<string> {
-  const { query, category } = input;
+export type MemorySearchDetail = "compact" | "normal" | "debug";
+
+export async function runSearch(input: {
+  query: string;
+  category?: string;
+  detail?: MemorySearchDetail;
+}): Promise<string> {
+  const { query, category, detail = "normal" } = input;
+  if (category !== undefined && !validCategory(category)) return `Invalid memory category: ${category}`;
   const memoryDir = resolveMemoryDir();
   const indexDir = ragIndexDir(memoryDir);
   const searchDir = category ? posix.join(memoryDir, category) : memoryDir;
@@ -271,6 +312,7 @@ export async function runSearch(input: { query: string; category?: string }): Pr
     score: number;
   }> = [];
 
+  const telemetryCounts = accessCounts(memoryDir);
   for (const [path, info] of resultMap) {
     try {
       const content = await Bun.file(posix.join(memoryDir, path)).text();
@@ -285,7 +327,7 @@ export async function runSearch(input: { query: string; category?: string }): Pr
         tags: meta.tags,
         path,
         importance: meta.importance,
-        accessCount: meta.access_count,
+        accessCount: (meta.access_count ?? 0) + (telemetryCounts.get(path) ?? 0),
         terms,
       });
 
@@ -295,83 +337,86 @@ export async function runSearch(input: { query: string; category?: string }): Pr
     }
   }
 
-  results.sort((a, b) => b.score - a.score);
+  results.sort((a, b) => b.score - a.score || a.path.localeCompare(b.path));
 
-  const lines = [`## Results for "${query}" (${results.length} matches)\n`];
+  // Filter out low-relevance results. If every candidate is below the
+  // threshold, retain a few fallbacks rather than returning an empty result.
+  const filtered = results.filter((r) => r.score >= 0.2);
+  const topResults = filtered.length > 0 ? filtered : results.slice(0, 3);
+  const shown = topResults.slice(0, 5);
+  const lines = [`## Results for "${query}" (${results.length} candidates, showing ${shown.length})\n`];
+
   if (crossCategoryFallback) {
     lines.push(`_No results in **${category}/** — showing matches from all categories:_\n`);
   }
   if (terms.length > 1) {
     lines.push(`_Searching for: ${terms.join(", ")}_\n`);
   }
-  // Filter out low-relevance results — raised threshold to reduce noise.
-  const filtered = results.filter((r) => r.score >= 0.2);
-  const topResults = filtered.length > 0 ? filtered : results.slice(0, 3);
 
-  const FULL_DETAIL_COUNT = 3;
-  const MAX_RESULTS = 7;
-
-  for (const [i, r] of topResults.slice(0, MAX_RESULTS).entries()) {
-    const isDirectHit = r.rgMatch && r.ragScore !== undefined && r.ragScore > 0.4 && r.termMatches === terms.length;
+  for (const [i, r] of shown.entries()) {
+    const isDirectHit =
+      r.rgMatch && r.ragScore !== undefined && r.ragScore > 0.4 && r.termMatches === terms.length;
     const hitLabel = isDirectHit ? " ★ DIRECT HIT" : "";
+    const summary = r.meta.summary ? ` — ${r.meta.summary}` : "";
 
-    if (i < FULL_DETAIL_COUNT) {
-      lines.push(`${i + 1}. **${r.path}** [${r.meta.importance || "medium"}]${hitLabel}`);
-      if (r.meta.tags?.length) lines.push(`   Tags: ${r.meta.tags.join(", ")}`);
-      if (r.meta.summary) lines.push(`   ${r.meta.summary}`);
-      const sources: string[] = [];
-      if (r.rgMatch) {
-        const termInfo = terms.length > 1 ? ` (${r.termMatches}/${terms.length} terms)` : "";
-        sources.push(`keyword${termInfo}`);
-      }
-      if (r.ragScore) sources.push(`semantic: ${r.ragScore.toFixed(2)}`);
-      lines.push(`   Match: ${sources.join(" + ")} | score: ${r.score.toFixed(2)}`);
-      if (r.meta.related?.length) lines.push(`   Related: ${r.meta.related.join(", ")}`);
-      if (r.ragText) {
-        lines.push(`   Preview: "...${r.ragText.slice(0, 200).trim()}..."`);
-      }
-    } else {
-      const summary = r.meta.summary ? ` — ${r.meta.summary}` : "";
+    if (detail === "compact" || i >= 2) {
       lines.push(`${i + 1}. **${r.path}** [${r.meta.importance || "medium"}]${summary}`);
+      continue;
+    }
+
+    lines.push(`${i + 1}. **${r.path}** [${r.meta.importance || "medium"}]${hitLabel}`);
+    if (r.meta.summary) lines.push(`   ${r.meta.summary}`);
+
+    const sources: string[] = [];
+    if (r.rgMatch) {
+      const termInfo = terms.length > 1 ? ` (${r.termMatches}/${terms.length} terms)` : "";
+      sources.push(`keyword${termInfo}`);
+    }
+    if (r.ragScore !== undefined) sources.push("semantic");
+    if (sources.length > 0) lines.push(`   Evidence: ${sources.join(" + ")}`);
+    if (r.ragText) lines.push(`   Preview: "...${r.ragText.slice(0, 160).trim()}..."`);
+
+    if (detail === "debug") {
+      const semantic = r.ragScore === undefined ? "n/a" : r.ragScore.toFixed(3);
+      lines.push(
+        `   Diagnostics: keyword=${r.rgMatch}; term_hits=${r.termMatches}/${terms.length}; ` +
+          `semantic=${semantic}; combined_score=${r.score.toFixed(3)}`,
+      );
+      if (r.meta.tags?.length) lines.push(`   Tags: ${r.meta.tags.join(", ")}`);
+      if (r.meta.related?.length) lines.push(`   Related: ${r.meta.related.join(", ")}`);
     }
     lines.push("");
   }
 
-  if (topResults.length > 0) {
-    lines.push(`_Read the top result: \`${formatMemoryPathForDisplay(memoryDir, topResults[0].path)}\`_`);
-    lines.push("");
+  if (shown.length > 0) {
+    lines.push(`_Read the top result: \`memory_read(path="${shown[0].path}")\`_`);
   }
 
-  // Collect Related: files that weren't in the primary result set so the
-  // caller can pursue interesting cross-references.
-  const shownPaths = new Set(topResults.slice(0, 7).map((r) => r.path));
-  const relatedSuggestions: string[] = [];
-  for (const r of topResults.slice(0, 7)) {
-    for (const rel of r.meta.related || []) {
-      if (!shownPaths.has(rel) && !relatedSuggestions.includes(rel)) {
-        relatedSuggestions.push(rel);
+  // Related-file verification and expansion is intentionally debug-only:
+  // it is useful for ranker investigation but too noisy for normal retrieval.
+  if (detail === "debug") {
+    const shownPaths = new Set(shown.map((r) => r.path));
+    const relatedSuggestions: string[] = [];
+    for (const r of shown) {
+      for (const rel of r.meta.related || []) {
+        if (!shownPaths.has(rel) && !relatedSuggestions.includes(rel)) relatedSuggestions.push(rel);
       }
     }
-  }
 
-  const verified: string[] = [];
-  for (const rel of relatedSuggestions) {
-    try {
-      if (await Bun.file(posix.join(memoryDir, rel)).exists()) verified.push(rel);
-    } catch {
-      // ignore — file doesn't exist
+    const verified: string[] = [];
+    for (const rel of relatedSuggestions) {
+      try {
+        const relatedPath = resolveContainedPath(memoryDir, rel);
+        if (await Bun.file(relatedPath).exists()) verified.push(rel);
+      } catch {
+        // Ignore invalid or missing related-file pointers.
+      }
     }
-  }
 
-  if (verified.length > 0) {
-    lines.push("---");
-    lines.push(
-      `**Related files** (not in results — use the Read tool on ${formatMemoryPathForDisplay(memoryDir, "{path}")}):`,
-    );
-    for (const rel of verified) {
-      lines.push(`  - ${rel}`);
+    if (verified.length > 0) {
+      lines.push("", "---", "**Related files** (debug expansion):");
+      for (const rel of verified) lines.push(`  - ${rel}`);
     }
-    lines.push("");
   }
 
   return lines.join("\n");
@@ -381,9 +426,9 @@ export const list: ToolDefinition = tool({
   description: memoryListDescription(),
   args: {
     category: tool.schema
-      .string()
+      .enum(CATEGORIES)
       .optional()
-      .describe("Category to list: preferences, repos, technical, people, workflows, snippets, notes"),
+      .describe("Memory category to list"),
   },
   async execute({ category }) {
     return runList({ category });
@@ -414,6 +459,7 @@ export async function runList(input: { category?: string }): Promise<string> {
     return lines.join("\n");
   }
 
+  if (!validCategory(category)) return `Invalid memory category: ${category}`;
   const catDir = posix.join(memoryDir, category);
   const glob = new Bun.Glob("**/*.md");
   const files: Array<{
@@ -458,10 +504,162 @@ export async function runList(input: { category?: string }): Promise<string> {
   return lines.join("\n");
 }
 
+const MAX_READ_CHARS = 16_000;
+const DEFAULT_READ_CHARS = 4_000;
+
+function sliceCodePointSafe(text: string, start: number, maxChars: number): string {
+  let safeStart = Math.min(start, text.length);
+  if (safeStart > 0 && safeStart < text.length) {
+    const current = text.charCodeAt(safeStart);
+    const previous = text.charCodeAt(safeStart - 1);
+    if (current >= 0xdc00 && current <= 0xdfff && previous >= 0xd800 && previous <= 0xdbff) safeStart++;
+  }
+  let end = Math.min(text.length, safeStart + maxChars);
+  if (end > safeStart && end < text.length) {
+    const previous = text.charCodeAt(end - 1);
+    const current = text.charCodeAt(end);
+    if (previous >= 0xd800 && previous <= 0xdbff && current >= 0xdc00 && current <= 0xdfff) end--;
+  }
+  return text.slice(safeStart, end);
+}
+
+function normalizeHeading(value: string): string {
+  return value
+    .replace(/^#{1,6}\s+/, "")
+    .replace(/\s+#+\s*$/, "")
+    .trim()
+    .toLowerCase();
+}
+
+/** Select an ATX heading and its descendants, stopping at the next peer/parent. */
+export function selectHeadingSection(body: string, heading: string): string | undefined {
+  const wanted = normalizeHeading(heading);
+  if (!wanted) return undefined;
+
+  const lines = body.split("\n");
+  let start = -1;
+  let level = 0;
+  for (let i = 0; i < lines.length; i++) {
+    const match = lines[i].match(/^(#{1,6})\s+(.+?)\s*$/);
+    if (match && normalizeHeading(match[2]) === wanted) {
+      start = i;
+      level = match[1].length;
+      break;
+    }
+  }
+  if (start < 0) return undefined;
+
+  let end = lines.length;
+  for (let i = start + 1; i < lines.length; i++) {
+    const match = lines[i].match(/^(#{1,6})\s+/);
+    if (match && match[1].length <= level) {
+      end = i;
+      break;
+    }
+  }
+  return lines.slice(start, end).join("\n").trimEnd();
+}
+
+async function resolveRealPathContained(memoryDir: string, filePath: string): Promise<string> {
+  const [realRoot, realFile] = await Promise.all([realpath(memoryDir), realpath(filePath)]);
+  const root = normPath(realRoot);
+  const file = normPath(realFile);
+  const relative = posix.relative(root, file);
+  if (relative === "" || relative === ".." || relative.startsWith("../") || posix.isAbsolute(relative)) {
+    throw new Error("Resolved path is outside the memory directory");
+  }
+  return realFile;
+}
+
+export const read: ToolDefinition = tool({
+  description:
+    "Read a bounded portion of one memory file and automatically record successful access. " +
+    "Returns frontmatter plus either the named Markdown heading section or the beginning of the body, " +
+    "with truncation/continuation metadata. Prefer this over the general Read tool after memory_search.",
+  args: {
+    path: tool.schema.string().describe(memoryAccessPathDescription()),
+    heading: tool.schema
+      .string()
+      .optional()
+      .describe('Optional Markdown heading text to select (for example, "Build and test")'),
+    offset: tool.schema
+      .number()
+      .optional()
+      .describe("Character offset within the selected body or heading section (default 0)"),
+    max_chars: tool.schema
+      .number()
+      .optional()
+      .describe("Maximum memory-content characters to return, including bounded frontmatter (default 4000, maximum 16000)"),
+  },
+  async execute({ path, heading, offset = 0, max_chars = DEFAULT_READ_CHARS }) {
+    return runRead({ path, heading, offset, maxChars: max_chars });
+  },
+});
+
+export async function runRead(input: {
+  path: string;
+  heading?: string;
+  offset?: number;
+  maxChars?: number;
+}): Promise<string> {
+  const memoryDir = resolveMemoryDir();
+  let filePath: string;
+  try {
+    filePath = await resolveRealPathContained(memoryDir, resolveContainedPath(memoryDir, input.path));
+  } catch {
+    return `Could not read ${input.path}: path is missing or outside the memory directory`;
+  }
+
+  let content: string;
+  try {
+    content = await Bun.file(filePath).text();
+  } catch {
+    return `Could not read ${input.path}`;
+  }
+
+  const frontmatterMatch = content.match(/^(---\n[\s\S]*?\n---\n?)([\s\S]*)$/);
+  const frontmatter = frontmatterMatch?.[1] ?? "";
+  const body = frontmatterMatch?.[2] ?? content;
+  const selected = input.heading ? selectHeadingSection(body, input.heading) : body;
+  if (selected === undefined) {
+    return `Heading not found in ${input.path}: ${input.heading}`;
+  }
+
+  const requestedMax = Number.isFinite(input.maxChars) ? Math.trunc(input.maxChars!) : DEFAULT_READ_CHARS;
+  const maxChars = Math.max(2, Math.min(MAX_READ_CHARS, requestedMax));
+  const requestedOffset = Number.isFinite(input.offset) ? Math.trunc(input.offset!) : 0;
+  const offset = Math.max(0, requestedOffset);
+  if (offset > selected.length) return `Offset ${offset} is beyond the selected content (${selected.length} characters)`;
+
+  // Frontmatter is useful routing context on the first page, but it must not
+  // defeat the total memory-content budget. Reserve at least 75% for body.
+  const frontmatterBudget = offset === 0 ? Math.min(frontmatter.length, Math.floor(maxChars / 4), 1_000) : 0;
+  const shownFrontmatter = sliceCodePointSafe(frontmatter, 0, frontmatterBudget);
+  const bodyBudget = maxChars - shownFrontmatter.length;
+  const excerpt = sliceCodePointSafe(selected, offset, bodyBudget);
+  const safeOffset = offset < selected.length && excerpt.length > 0 ? selected.indexOf(excerpt, offset) : offset;
+  const nextOffset = safeOffset + excerpt.length;
+  const truncated = nextOffset < selected.length;
+  const selection = input.heading ? `heading=${JSON.stringify(input.heading)}` : "body";
+  const metadata =
+    `[memory_read: path=${JSON.stringify(input.path)}; selection=${selection}; offset=${safeOffset}; ` +
+    `shown_chars=${shownFrontmatter.length + excerpt.length}; total_chars=${selected.length}; truncated=${truncated}` +
+    (frontmatter.length > shownFrontmatter.length && offset === 0 ? `; frontmatter_truncated=${frontmatter.length - shownFrontmatter.length}` : "") +
+    (truncated ? `; next_char=${nextOffset}; remaining_chars=${selected.length - nextOffset}` : "") +
+    "]";
+
+  // Retrieval and section selection succeeded. Record usage in the ignored
+  // sidecar database; telemetry must never rewrite the source memory.
+  await recordAccessAtPath(filePath, input.path, memoryDir);
+
+  const memoryContent = `${shownFrontmatter}${excerpt}`;
+  return `${memoryContent}${memoryContent.endsWith("\n") ? "" : "\n"}\n---\n${metadata}`;
+}
+
 export const access: ToolDefinition = tool({
   description:
-    "Record that a memory file was accessed (read and used). Updates last_accessed date " +
-    "and increments access_count in frontmatter. Call this AFTER reading a memory file " +
+    "Record that a memory file was accessed (read and used). Updates sidecar access telemetry " +
+    "without rewriting the memory file. Call this AFTER reading a memory file " +
     "that you actually used to inform your work — not for casual browsing.\n\n" +
     "This helps the memory system track which memories are actively useful vs. stale.",
   args: {
@@ -472,24 +670,33 @@ export const access: ToolDefinition = tool({
   },
 });
 
-export async function runAccess(input: { path: string }): Promise<string> {
-  const memoryDir = resolveMemoryDir();
-  const { path } = input;
-  const filePath = posix.join(memoryDir, path);
+async function recordAccessAtPath(filePath: string, displayPath: string, memoryDir: string): Promise<string> {
   try {
     const content = await Bun.file(filePath).text();
-    const fmMatch = content.match(/^---\n([\s\S]*?)\n---\n?([\s\S]*)$/);
-    if (!fmMatch) return `No frontmatter in ${path} — skipped`;
-
-    const yaml = fmMatch[1];
-    const body = fmMatch[2];
-    const dateStr = todayISO();
-    const { yaml: updatedYaml, newCount } = bumpAccessFields(yaml, dateStr);
-
-    await Bun.write(filePath, `---\n${updatedYaml}\n---\n${body}`);
-    return `Recorded access for ${path} (count: ${newCount})`;
+    const { meta } = parseFrontmatter(content);
+    if (!content.startsWith("---\n")) return `No frontmatter in ${displayPath} — skipped`;
+    const increment = withAccessDatabase(memoryDir, (database) => database.transaction(() => {
+      database.query(
+        `INSERT INTO memory_access(path, access_count, last_accessed) VALUES (?, 1, ?)
+         ON CONFLICT(path) DO UPDATE SET access_count = access_count + 1, last_accessed = excluded.last_accessed`,
+      ).run(displayPath, todayISO());
+      return database.query<{ access_count: number }, [string]>(
+        "SELECT access_count FROM memory_access WHERE path = ?",
+      ).get(displayPath)?.access_count ?? 0;
+    })());
+    return `Recorded access for ${displayPath} (count: ${(meta.access_count ?? 0) + increment})`;
   } catch {
-    return `Could not update ${path}`;
+    return `Could not update ${displayPath}`;
+  }
+}
+
+export async function runAccess(input: { path: string }): Promise<string> {
+  const memoryDir = resolveMemoryDir();
+  try {
+    const filePath = await resolveRealPathContained(memoryDir, resolveContainedPath(memoryDir, input.path));
+    return recordAccessAtPath(filePath, input.path, memoryDir);
+  } catch {
+    return `Could not update ${input.path}`;
   }
 }
 

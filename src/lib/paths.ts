@@ -62,6 +62,31 @@ export function normalizeDirPath(p: string): string {
 }
 
 /**
+ * Resolve a caller-provided relative path beneath a trusted root.
+ *
+ * This is a lexical containment check; callers that read existing files
+ * should additionally compare their real paths if symlinks are in scope.
+ */
+export function resolveContainedPath(root: string, relativePath: string): string {
+  if (!relativePath || relativePath.includes("\0")) {
+    throw new Error("Path must be a non-empty relative path");
+  }
+
+  const normalizedRoot = normalizeDirPath(root);
+  const normalizedRelative = normPath(relativePath);
+  if (posix.isAbsolute(normalizedRelative) || /^[A-Za-z]:\//.test(normalizedRelative)) {
+    throw new Error("Path must be relative");
+  }
+
+  const resolved = posix.resolve(normalizedRoot, normalizedRelative);
+  const relative = posix.relative(normalizedRoot, resolved);
+  if (relative === "" || relative === ".." || relative.startsWith("../") || posix.isAbsolute(relative)) {
+    throw new Error("Path must resolve to a file within the configured directory");
+  }
+  return resolved;
+}
+
+/**
  * Expand a leading `~` in user-provided paths. Shells usually expand
  * this before setting OPENCODE_MEMORY_DIR, but JSON-based host configs
  * often pass it through literally. Supporting it here lets users write

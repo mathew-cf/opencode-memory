@@ -2,7 +2,7 @@
  * OpenCode Memory Plugin — persistent cross-session memory.
  *
  * Wires up:
- *  - 4 memory tools (search / list / save / access / setup)
+ *  - 6 memory tools (search / read / list / save / access / setup)
  *  - 3 session tools (search / read / list)
  *  - 2 hooks (tool.execute.after guard + compaction context injection)
  *  - Config modifications (skill path, agent prompts, permission rules)
@@ -48,6 +48,7 @@ const MemoryPlugin: Plugin = async () => {
   // `opencode-memory_search` etc.
   const tools = {
     memory_search: memory.search,
+    memory_read: memory.read,
     memory_list: memory.list,
     memory_save: memory.save,
     memory_access: memory.access,

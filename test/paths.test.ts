@@ -6,6 +6,7 @@ import {
   normPath,
   normalizeDirPath,
   ragIndexDir,
+  resolveContainedPath,
   resolveHome,
   resolveMemoryDir,
 } from "../src/lib/paths";
@@ -61,6 +62,20 @@ describe("expandHomePath", () => {
 
   test("leaves non-tilde paths unchanged", () => {
     expect(expandHomePath("/tmp/mem", { HOME: "/home/mat" })).toBe("/tmp/mem");
+  });
+});
+
+describe("resolveContainedPath", () => {
+  test("resolves a nested relative path beneath the root", () => {
+    expect(resolveContainedPath("/tmp/memory", "technical/foo.md")).toBe(
+      "/tmp/memory/technical/foo.md",
+    );
+  });
+
+  test("rejects absolute paths and traversal", () => {
+    expect(() => resolveContainedPath("/tmp/memory", "/etc/passwd")).toThrow();
+    expect(() => resolveContainedPath("/tmp/memory", "../../etc/passwd")).toThrow();
+    expect(() => resolveContainedPath("/tmp/memory", "C:\\outside\\file.md")).toThrow();
   });
 });
 

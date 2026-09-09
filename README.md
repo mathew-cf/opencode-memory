@@ -12,7 +12,7 @@ LLM agents forget everything between sessions. That means rediscovering the same
 
 | Category           | Additions                                                                 |
 | ------------------ | ------------------------------------------------------------------------- |
-| **Memory tools**   | `memory_search`, `memory_list`, `memory_save`, `memory_access`, `memory_setup` |
+| **Memory tools**   | `memory_search`, `memory_read`, `memory_list`, `memory_save`, `memory_access`, `memory_setup` |
 | **Session tools**  | `session_search`, `session_read`, `session_list` (OpenCode only — read OpenCode's SQLite history) |
 | **Hooks**          | Search-first nudge at 8 tool calls; discovery nudge on subagent outputs; retrospective reminder at compaction time (OpenCode only) |
 | **Skill**          | `opencode-memory` — auto-registered in OpenCode, dropped at `~/.agents/skills/opencode-memory` for Zed & Pi |
@@ -106,11 +106,22 @@ After writing or editing files, call `memory_save` — it runs `git add -A` + co
 ### Searching
 
 ```
-memory_search("retry jitter")             # hybrid rg + rag
+memory_search("retry jitter")             # compact hybrid rg + rag results (up to 5)
 memory_search("auth", category="repos")   # filter to a category
-memory_list()                             # browse categories + counts
-memory_list("technical")                  # list files in one category
+memory_read("repos/example.md")            # frontmatter + first 4,000 body chars
+memory_read("repos/example.md", heading="Build") # retrieve one heading section
+memory_list()                              # browse categories + counts
+memory_list("technical")                   # list files in one category
 ```
+
+### Reading session history
+
+`session_search` returns a message `offset` for each content match. Pass that to
+`session_read` to jump to the relevant message. Session reads normalize invalid
+pagination values, cap `limit` at 100 messages, and expose at most about 16,000
+message-text characters per call. If that bound falls within one oversized
+message, the response provides both `offset` and `message_char_offset`; pass
+both back to continue at a UTF-safe boundary without skipping content.
 
 See the bundled skill (`skills/opencode-memory/SKILL.md`) for the full protocol.
 
