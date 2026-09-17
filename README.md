@@ -25,7 +25,7 @@ LLM agents forget everything between sessions. That means rediscovering the same
 ```jsonc
 // opencode.jsonc
 {
-  "plugin": ["@mathew-cf/opencode-memory@1.2.0"]
+  "plugin": ["@mathew-cf/opencode-memory@1.2.1"]
 }
 ```
 
