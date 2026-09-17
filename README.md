@@ -13,7 +13,7 @@ LLM agents forget everything between sessions. That means rediscovering the same
 | Category           | Additions                                                                 |
 | ------------------ | ------------------------------------------------------------------------- |
 | **Memory tools**   | `memory_search`, `memory_read`, `memory_list`, `memory_save`, `memory_access`, `memory_setup` |
-| **Session tools**  | `session_search`, `session_read`, `session_list` (OpenCode only — read OpenCode's SQLite history) |
+| **Session tools**  | `session_search_all` across OpenCode, Pi, and Codex; `session_search`, `session_read`, and `session_list` for OpenCode history |
 | **Hooks**          | Search-first nudge at 8 tool calls; discovery nudge on subagent outputs; retrospective reminder at compaction time (OpenCode only) |
 | **Skill**          | `opencode-memory` — auto-registered in OpenCode, dropped at `~/.agents/skills/opencode-memory` for Zed & Pi |
 | **Agent prompts**  | Built-in subagents (`general`, `explore`, `research`, `review`, `investigator`) get a memory-aware prompt prepended non-destructively (OpenCode only) |
@@ -116,8 +116,15 @@ memory_list("technical")                   # list files in one category
 
 ### Reading session history
 
-`session_search` returns a message `offset` for each content match. Pass that to
-`session_read` to jump to the relevant message. Session reads normalize invalid
+`session_search_all` queries OpenCode, Pi, and Codex concurrently and labels each
+source. Missing harnesses are reported without failing the available searches.
+The `limit` applies per source. Results include IDs and snippets; when a harness's
+native reader is installed, use it to open that source's session.
+Pi discovery scans its JSONL history, including historical branches; use Pi's
+native reader when you need its active-branch and compaction-aware view.
+
+The OpenCode-only `session_search` returns a message `offset` for each content
+match. Pass that to `session_read` to jump to the relevant message. Session reads normalize invalid
 pagination values, cap `limit` at 100 messages, and expose at most about 16,000
 message-text characters per call. If that bound falls within one oversized
 message, the response provides both `offset` and `message_char_offset`; pass

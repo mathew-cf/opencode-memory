@@ -46,6 +46,12 @@ describe("afterToolUpdate", () => {
     expect(state.sessionSearched).toBe(true);
   });
 
+  test("sets sessionSearched on session_search_all", () => {
+    const state = makeInitialState();
+    afterToolUpdate(state, { tool: "session_search_all", output: "" });
+    expect(state.sessionSearched).toBe(true);
+  });
+
   test("sets memorySaved and increments saveCount", () => {
     const state = makeInitialState();
     afterToolUpdate(state, { tool: "memory_save", output: "" });

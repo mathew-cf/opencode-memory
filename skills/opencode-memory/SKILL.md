@@ -19,6 +19,10 @@ The goal isn't to save everything — it's to save what took >1 minute to figure
 | `memory_save()`                   | Commit + re-index after writing/editing |
 | `memory_access(path)`             | Mark a file as read & useful (bumps ranking) |
 | `memory_setup()`                  | Check `rag` install status, print guidance |
+| `session_search(query, limit?, directory?)` | Search OpenCode session history |
+| `session_search_all(query, limit?, directory?)` | Concurrently search OpenCode, Pi, and Codex; unavailable harnesses are non-fatal |
+| `session_read(session_id, ...)`   | Read one OpenCode session |
+| `session_list(...)`               | Browse OpenCode sessions |
 
 Read search results with `memory_read`; use `heading` to retrieve only a relevant section. The legacy `memory_access` remains available when a memory was read through another surface.
 

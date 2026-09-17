@@ -75,7 +75,7 @@ export function afterToolUpdate(
   state.toolCalls++;
 
   if (matchesToolName(input.tool, ["memory_search"])) state.memorySearched = true;
-  if (matchesToolName(input.tool, ["session_search"])) state.sessionSearched = true;
+  if (matchesToolName(input.tool, ["session_search", "session_search_all"])) state.sessionSearched = true;
   if (matchesToolName(input.tool, ["memory_save"])) {
     state.memorySaved = true;
     state.saveCount++;

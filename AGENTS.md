@@ -67,7 +67,7 @@ Both share `src/tools/memory.ts` and `src/lib/*`. Adding a new memory tool means
 
 Exports a default `Plugin` function. On load it returns:
 
-- **`tool`** — 8 custom tools, keyed with the `memory_` / `session_` prefixes so names match what skills and prompts already reference
+- **`tool`** — custom tools keyed with the `memory_` / `session_` prefixes so names match what skills and prompts already reference
 - **`config`** — calls `applyConfig()` to register the bundled skill directory, add edit/external_directory permissions for `~/opencode-memory/**`, and prepend the memory-awareness appendix to the built-in subagent prompts
 - **`tool.execute.after`** — `guard.toolAfter`, tracks memory/session tool usage, fires nudges
 - **`experimental.session.compacting`** — `guard.compacting`, injects preserve-through-compaction context

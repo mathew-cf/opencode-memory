@@ -1,14 +1,22 @@
 /**
  * Session tools: search, list, read.
  *
- * These read from the OpenCode SQLite database (WAL mode, safe to query
- * concurrently while OpenCode is running). The database path is resolved
- * lazily so tests can override it with `$OPENCODE_DB`.
+ * The core search/read/list tools use OpenCode's SQLite database (WAL mode,
+ * safe to query concurrently while OpenCode is running). `searchAll` fans out
+ * to optional Pi and Codex providers as well. Paths are resolved lazily so
+ * tests can override them.
  */
 
 import { tool, type ToolDefinition } from "@opencode-ai/plugin";
+import { existsSync } from "node:fs";
+import { searchCodexSessions } from "../lib/codex-session-search";
 import { querySqlite, resolveDbPath, sqlStr } from "../lib/db";
+import { searchPiSessions } from "../lib/pi-session-search";
 import { parseSearchTerms } from "../lib/search-terms";
+import {
+  searchSessionProviders,
+  type SessionSearchProvider,
+} from "../lib/session-fanout";
 
 // --- SQL builders (exported for tests) ---------------------------------
 
@@ -134,6 +142,64 @@ function sliceCodePointSafe(text: string, start: number, maxChars: number): { te
 
 // --- Tools -------------------------------------------------------------
 
+export const searchAll: ToolDefinition = tool({
+  description:
+    "Search previous OpenCode, Pi, and Codex sessions concurrently by keyword. " +
+    "Unavailable or uninstalled session backends are reported without failing available searches. " +
+    "Multi-term queries match sessions containing ANY search term (OR logic); sessions matching more " +
+    "terms rank higher. Results are grouped by source; limit applies per source.",
+  args: {
+    query: tool.schema.string().describe("Keyword or phrase to search for"),
+    limit: tool.schema
+      .number()
+      .optional()
+      .describe("Max sessions to return per source (default 10)"),
+    directory: tool.schema
+      .string()
+      .optional()
+      .describe(
+        "Filter to sessions from a specific project directory (substring match)",
+      ),
+  },
+  async execute({ query, limit = 10, directory }, context) {
+    return runAllSessionSearch({
+      query,
+      limit,
+      directory,
+      currentSessionId: context.sessionID,
+    });
+  },
+});
+
+export async function runAllSessionSearch(
+  input: {
+    query: string;
+    limit?: number;
+    directory?: string;
+    currentSessionId?: string;
+  },
+  providers?: SessionSearchProvider[],
+): Promise<string> {
+  const trimmedQuery = input.query.trim();
+  if (!trimmedQuery) return "No search terms provided.";
+  const safeLimit = normalizeSessionInteger(input.limit, 10, 1, MAX_SESSION_RESULTS);
+  const request = { ...input, query: trimmedQuery, limit: safeLimit };
+  const activeProviders: SessionSearchProvider[] = providers ?? [
+    {
+      source: "OpenCode",
+      search: async (providerInput) => {
+        if (!existsSync(resolveDbPath())) {
+          throw new Error("OpenCode is not installed or has no session database");
+        }
+        return runSessionSearch(providerInput);
+      },
+    },
+    { source: "Pi", search: searchPiSessions },
+    { source: "Codex", search: searchCodexSessions },
+  ];
+  return searchSessionProviders(request, activeProviders);
+}
+
 export const search: ToolDefinition = tool({
   description:
     "Search previous OpenCode sessions by keyword. Searches both session titles and message content. " +
@@ -142,16 +208,11 @@ export const search: ToolDefinition = tool({
     "session_read to jump directly to the relevant part of a long session.",
   args: {
     query: tool.schema.string().describe("Keyword or phrase to search for"),
-    limit: tool.schema
-      .number()
-      .optional()
-      .describe("Max sessions to return (default 10)"),
+    limit: tool.schema.number().optional().describe("Max sessions to return (default 10)"),
     directory: tool.schema
       .string()
       .optional()
-      .describe(
-        "Filter to sessions from a specific project directory (substring match)",
-      ),
+      .describe("Filter to sessions from a specific project directory (substring match)"),
   },
   async execute({ query, limit = 10, directory }, context) {
     return runSessionSearch({

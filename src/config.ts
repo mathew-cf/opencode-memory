@@ -72,7 +72,7 @@ export const BUILTIN_SUBAGENTS = ["general", "explore"] as const;
 export const TARGET_AGENTS = ["general", "explore", "research", "review", "investigator"] as const;
 
 /**
- * Explore needs explicit permission to call memory_search/session_search
+ * Explore needs explicit permission to call memory and session search tools
  * because its built-in allowlist doesn't include them.
  */
 export const EXPLORE_PERMISSIONS: Record<string, string> = {
@@ -81,6 +81,7 @@ export const EXPLORE_PERMISSIONS: Record<string, string> = {
   memory_list: "allow",
   memory_access: "allow",
   session_search: "allow",
+  session_search_all: "allow",
   session_read: "allow",
   session_list: "allow",
 };

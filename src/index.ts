@@ -3,7 +3,7 @@
  *
  * Wires up:
  *  - 6 memory tools (search / read / list / save / access / setup)
- *  - 3 session tools (search / read / list)
+ *  - Session tools (cross-harness search plus OpenCode search / read / list)
  *  - 2 hooks (tool.execute.after guard + compaction context injection)
  *  - Config modifications (skill path, agent prompts, permission rules)
  */
@@ -54,6 +54,7 @@ const MemoryPlugin: Plugin = async () => {
     memory_access: memory.access,
     memory_setup: memory.setup,
     session_search: session.search,
+    session_search_all: session.searchAll,
     session_read: session.read,
     session_list: session.list,
   };

@@ -8,7 +8,7 @@
  */
 
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -18,10 +18,14 @@ import {
   normalizeSessionInteger,
   runSessionList,
   runSessionRead,
+  runAllSessionSearch,
   runSessionSearch,
   sessionTermHits,
   termHits,
 } from "../src/tools/session";
+import type { SessionSearchProvider } from "../src/lib/session-fanout";
+import { searchCodexSessions } from "../src/lib/codex-session-search";
+import { searchPiSessions } from "../src/lib/pi-session-search";
 import { sqlStr } from "../src/lib/db";
 
 describe("sqlStr", () => {
@@ -307,6 +311,91 @@ describe("runSessionSearch", () => {
   test("returns a friendly message when nothing matches", async () => {
     const out = await runSessionSearch({ query: "unicorn" });
     expect(out).toContain('No sessions found matching "unicorn"');
+  });
+});
+
+describe("unified session search", () => {
+  test("starts OpenCode, Pi, and Codex searches concurrently", async () => {
+    const started: string[] = [];
+    const releases = new Map<string, () => void>();
+    const providers = (["OpenCode", "Pi", "Codex"] as const).map((source): SessionSearchProvider => ({
+      source,
+      search: async () => {
+        started.push(source);
+        await new Promise<void>((resolve) => releases.set(source, resolve));
+        return `${source} result`;
+      },
+    }));
+
+    const pending = runAllSessionSearch({ query: "retry" }, providers);
+    await Promise.resolve();
+    expect(started).toEqual(["OpenCode", "Pi", "Codex"]);
+    for (const release of releases.values()) release();
+
+    const output = await pending;
+    expect(output).toContain("### OpenCode\n\nOpenCode result");
+    expect(output).toContain("### Pi\n\nPi result");
+    expect(output).toContain("### Codex\n\nCodex result");
+  });
+
+  test("keeps successful results when another harness is unavailable", async () => {
+    const providers: SessionSearchProvider[] = [
+      { source: "OpenCode", search: async () => "OpenCode result" },
+      { source: "Pi", search: async () => { throw new Error("Pi is not installed"); } },
+      { source: "Codex", search: async () => "Codex result" },
+    ];
+
+    const output = await runAllSessionSearch({ query: "retry" }, providers);
+    expect(output).toContain("OpenCode result");
+    expect(output).toContain("Codex result");
+    expect(output).toContain("Unavailable sources: Pi: Pi is not installed");
+  });
+
+  test("isolates a provider that throws before returning a promise", async () => {
+    const providers: SessionSearchProvider[] = [
+      { source: "OpenCode", search: (() => { throw new Error("OpenCode unavailable"); }) as SessionSearchProvider["search"] },
+      { source: "Pi", search: async () => "Pi result" },
+      { source: "Codex", search: async () => "Codex result" },
+    ];
+
+    const output = await runAllSessionSearch({ query: "retry" }, providers);
+    expect(output).toContain("Pi result");
+    expect(output).toContain("Codex result");
+    expect(output).toContain("Unavailable sources: OpenCode: OpenCode unavailable");
+  });
+
+  test("searches Pi JSONL history", async () => {
+    const root = join(tmp, "pi-sessions");
+    mkdirSync(root, { recursive: true });
+    writeFileSync(join(root, "fixture.jsonl"), [
+      JSON.stringify({ type: "session", id: "pi-fixture", cwd: "/tmp/proj", timestamp: "2026-01-01T00:00:00Z" }),
+      JSON.stringify({ type: "message", timestamp: "2026-01-01T00:00:01Z", message: { role: "user", content: "investigate retry jitter" } }),
+      JSON.stringify({ type: "message", timestamp: "2026-01-01T00:00:02Z", message: { role: "assistant", content: [{ type: "text", text: "use exponential backoff" }] } }),
+    ].join("\n"));
+    const previous = process.env.PI_CODING_AGENT_SESSION_DIR;
+    process.env.PI_CODING_AGENT_SESSION_DIR = root;
+    try {
+      const output = await searchPiSessions({ query: "retry jitter", directory: "proj", limit: 5 });
+      expect(output).toContain("pi-fixture");
+      expect(output).toContain("(2/2 terms)");
+      expect(output).toContain("investigate retry jitter");
+    } finally {
+      if (previous === undefined) delete process.env.PI_CODING_AGENT_SESSION_DIR;
+      else process.env.PI_CODING_AGENT_SESSION_DIR = previous;
+    }
+  });
+
+  test("reports a missing Codex executable without crashing other callers", async () => {
+    const previous = process.env.CODEX_SESSION_TOOLS_CLI;
+    process.env.CODEX_SESSION_TOOLS_CLI = join(tmp, "missing-codex");
+    try {
+      await expect(searchCodexSessions({ query: "retry", limit: 5 })).rejects.toThrow(
+        "Codex is not installed or is not on PATH",
+      );
+    } finally {
+      if (previous === undefined) delete process.env.CODEX_SESSION_TOOLS_CLI;
+      else process.env.CODEX_SESSION_TOOLS_CLI = previous;
+    }
   });
 });
 
