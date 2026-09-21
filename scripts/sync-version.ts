@@ -3,47 +3,63 @@
  * Sync the version from package.json into README.md so users copy the
  * exact published version when they follow the installation snippet.
  * Run with: bun run sync-version
+ *
+ * Two things are rewritten:
+ *   - the package coordinate, e.g. `@mathew-cf/opencode-memory@1.3.0`
+ *   - the manual-install archive name, e.g. `opencode-memory-plugin-1.3.0`
+ *
+ * Both must tolerate prerelease versions (`1.3.0-rc.1`). A naive
+ * `\d+\.\d+\.\d+` matches only the numeric core, so re-running the script
+ * would append the prerelease suffix a second time and produce
+ * `1.3.0-rc.1-rc.1`. The patterns below consume the whole version and are
+ * bounded so they can't swallow a following `.tar.gz`.
  */
 
 import { readFileSync, writeFileSync } from "fs";
 import { join } from "path";
 
-const rootDir = join(import.meta.dir, "..");
-const packageJsonPath = join(rootDir, "package.json");
-const readmePath = join(rootDir, "README.md");
+/** Semver core plus an optional prerelease suffix, matched lazily. */
+const SEMVER = String.raw`\d+\.\d+\.\d+(?:-[0-9A-Za-z][0-9A-Za-z.-]*?)?`;
 
-const packageJson = JSON.parse(readFileSync(packageJsonPath, "utf-8"));
-const version = packageJson.version;
-const packageName = packageJson.name;
+const ARCHIVE_PREFIX = "opencode-memory-plugin-";
 
-let readme: string;
-try {
-  readme = readFileSync(readmePath, "utf-8");
-} catch {
-  console.log("README.md not present — skipping version sync");
-  process.exit(0);
+/**
+ * Rewrite every version reference in `readme`. Pure so the prerelease and
+ * idempotency behaviour can be tested without touching the filesystem.
+ */
+export function syncVersionText(readme: string, packageName: string, version: string): string {
+  // Bounded by a negative lookahead so `@1.3.0-rc.1` is consumed whole
+  // rather than leaving `-rc.1` behind to be duplicated.
+  const versionPattern = new RegExp(
+    `${packageName.replace(/[.*+?^${}()|[\]\\/]/g, "\\$&")}@${SEMVER}(?![0-9A-Za-z.-])`,
+    "g",
+  );
+  // Bounded by the archive extension so the suffix stops before `.tar.gz`.
+  const archivePattern = new RegExp(`${ARCHIVE_PREFIX}${SEMVER}(?=\\.(?:tar|zip))`, "g");
+
+  return readme
+    .replace(versionPattern, `${packageName}@${version}`)
+    .replace(archivePattern, `${ARCHIVE_PREFIX}${version}`);
 }
 
-// Match @scope/pkg@X.Y.Z — don't be greedy with the version number.
-const versionPattern = new RegExp(
-  `${packageName.replace("/", "\\/")}@\\d+\\.\\d+\\.\\d+`,
-  "g",
-);
+if (import.meta.main) {
+  const rootDir = join(import.meta.dir, "..");
+  const packageJson = JSON.parse(readFileSync(join(rootDir, "package.json"), "utf-8"));
+  const readmePath = join(rootDir, "README.md");
 
-// Match the manual-install archive names produced by scripts/pack-plugin.ts,
-// e.g. opencode-memory-plugin-1.2.1.tar.gz — otherwise the manual install
-// instructions would keep pointing at whatever version shipped first.
-const archivePattern = /opencode-memory-plugin-\d+\.\d+\.\d+/g;
+  let readme: string;
+  try {
+    readme = readFileSync(readmePath, "utf-8");
+  } catch {
+    console.log("README.md not present — skipping version sync");
+    process.exit(0);
+  }
 
-const newVersionString = `${packageName}@${version}`;
-const updatedReadme = readme
-  .replace(versionPattern, newVersionString)
-  .replace(archivePattern, `opencode-memory-plugin-${version}`);
-
-
-if (readme !== updatedReadme) {
-  writeFileSync(readmePath, updatedReadme);
-  console.log(`Updated README.md to version ${version}`);
-} else {
-  console.log(`README.md already at version ${version}`);
+  const updated = syncVersionText(readme, packageJson.name, packageJson.version);
+  if (readme !== updated) {
+    writeFileSync(readmePath, updated);
+    console.log(`Updated README.md to version ${packageJson.version}`);
+  } else {
+    console.log(`README.md already at version ${packageJson.version}`);
+  }
 }
