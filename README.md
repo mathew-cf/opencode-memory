@@ -46,7 +46,26 @@ One package serves both: the default export exposes a V1 `server()` and a V2 `se
 
 Use this when you don't want to install from npm — for example to run a build straight off a fork or a branch.
 
-Every release built by the **Build** workflow attaches `opencode-memory-plugin-<version>.tar.gz` (and a `.zip`). It contains `index.js`, `dist/`, `skills/`, and `package.json` — everything except the platform-specific binaries, which you fetch in step 2.
+Every release built by the **Build** workflow attaches `opencode-memory-plugin-<version>.tar.gz` (and a `.zip`). It contains `index.js`, `dist/`, `skills/`, and `package.json` — everything except the platform-specific binaries, which are installed on your machine.
+
+#### Scripted
+
+`scripts/install.sh` does the whole thing — downloads the newest release, installs the backends, places the payload, creates the memory directory, and fetches the embedding model:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/nedy13/opencode-memory/main/scripts/install.sh | bash
+```
+
+It needs `curl`, `tar`, `git`, and either `bun` or `npm`. Useful options:
+
+```bash
+./install.sh --tag v1.3.0          # pin a release
+./install.sh --project /path/repo  # install into one project instead of globally
+./install.sh --skip-model          # defer the ~90MB embedding model
+./install.sh --help
+```
+
+#### By hand
 
 > **Install the dependencies _before_ moving the plugin into place.** OpenCode watches its plugin
 > directories and loads a plugin the moment it appears. If it loads before `node_modules/` exists, Bun

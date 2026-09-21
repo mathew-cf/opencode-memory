@@ -59,6 +59,7 @@ skills/
 scripts/
   sync-version.ts       # Sync package.json version into README.md
   pack-plugin.ts        # Assemble build/ payload for manual installs
+  install.sh            # End-user installer for a GitHub release payload
 ```
 
 ## Architecture
