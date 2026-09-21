@@ -22,12 +22,25 @@ LLM agents forget everything between sessions. That means rediscovering the same
 
 ### OpenCode
 
+OpenCode 2:
+
+```jsonc
+// opencode.jsonc
+{
+  "plugins": ["@mathew-cf/opencode-memory@1.2.1"]
+}
+```
+
+OpenCode 1:
+
 ```jsonc
 // opencode.jsonc
 {
   "plugin": ["@mathew-cf/opencode-memory@1.2.1"]
 }
 ```
+
+One package serves both: the default export exposes a V1 `server()` and a V2 `setup()`, so the same version works on either release.
 
 Then bootstrap the memory directory + embedding model + skill:
 
@@ -39,9 +52,11 @@ This creates `~/opencode-memory/` (git repo, 7 category subdirs), downloads the 
 
 The plugin also auto-registers (OpenCode only):
 
-- its bundled skill under `config.skills.paths`
+- its bundled skill (V1: `config.skills.paths`; V2: a skill transform)
 - edit + external-directory permissions for `~/opencode-memory/**`
 - memory-aware prompt prefixes on the five built-in subagents (only when their prompt isn't already set)
+
+On OpenCode 2 the memory-directory permissions are attached to every agent, because V2 replaces the single global `permission` block with per-domain rules.
 
 ### Search backends
 
@@ -134,9 +149,9 @@ See the bundled skill (`skills/opencode-memory/SKILL.md`) for the full protocol.
 
 ## How the guard hook works
 
-The plugin installs two hooks:
+The plugin installs two hooks (V1 names first, V2 equivalents in parentheses):
 
-### `tool.execute.after`
+### `tool.execute.after` (V2: `ctx.tool.hook("execute.after")`)
 Tracks tool usage per session and injects short reminders into tool output when:
 
 - **8 tool calls deep with no search**: reminds the agent to call `memory_search` and `session_search` before going further.
@@ -144,7 +159,7 @@ Tracks tool usage per session and injects short reminders into tool output when:
 
 Reminders fire at most once per session each to avoid spam.
 
-### `experimental.session.compacting`
+### `experimental.session.compacting` (V2: `ctx.session.hook("compaction")`)
 Injects memory-specific preservation rules so references to saved files and search results survive summarization. If the session is >10 tool calls and never called `memory_save`, adds a retrospective reminder.
 
 ## Development
@@ -152,7 +167,7 @@ Injects memory-specific preservation rules so references to saved files and sear
 ```bash
 bun install
 bun run typecheck    # tsc --noEmit
-bun test             # 118 tests across 7 files
+bun test             # 236 tests across 14 files
 bun run build        # bundle to dist/
 ```
 

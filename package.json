@@ -52,11 +52,21 @@
   },
   "devDependencies": {
     "@opencode-ai/plugin": "^1.1.49",
+    "@opencode/plugin": "^2.0.11",
     "@types/bun": "^1.3.12",
     "@types/node": "^22.0.0",
     "typescript": "^5.0.0"
   },
   "peerDependencies": {
-    "@opencode-ai/plugin": ">=1.0.0"
+    "@opencode-ai/plugin": ">=1.0.0",
+    "@opencode/plugin": ">=2.0.0"
+  },
+  "peerDependenciesMeta": {
+    "@opencode-ai/plugin": {
+      "optional": true
+    },
+    "@opencode/plugin": {
+      "optional": true
+    }
   }
 }

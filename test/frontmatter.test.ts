@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import {
   bumpAccessFields,
   parseFrontmatter,
+  parseSkillFrontmatter,
   todayISO,
 } from "../src/lib/frontmatter";
 
@@ -137,5 +138,32 @@ describe("todayISO", () => {
     const s = todayISO();
     expect(s).toMatch(/^\d{4}-\d{2}-\d{2}$/);
     expect(s.length).toBe(10);
+  });
+});
+
+describe("parseSkillFrontmatter", () => {
+  test("reads name and description", () => {
+    const parsed = parseSkillFrontmatter("---\nname: my-skill\ndescription: Does a thing\n---\n\nBody");
+    expect(parsed).toEqual({ name: "my-skill", description: "Does a thing" });
+  });
+
+  test("returns nothing when there is no frontmatter", () => {
+    expect(parseSkillFrontmatter("Just a body")).toEqual({});
+  });
+
+  test("ignores unrelated keys and blank values", () => {
+    const parsed = parseSkillFrontmatter("---\nname: skill\nversion: 3\ndescription:\n---\nBody");
+    expect(parsed).toEqual({ name: "skill" });
+  });
+
+  test("strips surrounding quotes", () => {
+    const parsed = parseSkillFrontmatter('---\nname: "quoted"\ndescription: \'also quoted\'\n---\nBody');
+    expect(parsed).toEqual({ name: "quoted", description: "also quoted" });
+  });
+
+  test("keeps punctuation-heavy descriptions intact", () => {
+    const description = "Search ~/opencode-memory/ first — it saves 5–30 minutes. If in doubt, load it.";
+    const parsed = parseSkillFrontmatter(`---\nname: s\ndescription: ${description}\n---\nBody`);
+    expect(parsed.description).toBe(description);
   });
 });

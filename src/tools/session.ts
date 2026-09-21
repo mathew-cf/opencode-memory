@@ -7,7 +7,6 @@
  * tests can override them.
  */
 
-import { tool, type ToolDefinition } from "@opencode-ai/plugin";
 import { existsSync } from "node:fs";
 import { searchCodexSessions } from "../lib/codex-session-search";
 import { querySqlite, resolveDbPath, sqlStr } from "../lib/db";
@@ -17,6 +16,7 @@ import {
   searchSessionProviders,
   type SessionSearchProvider,
 } from "../lib/session-fanout";
+import { defineTool } from "../lib/tool-spec";
 
 // --- SQL builders (exported for tests) ---------------------------------
 
@@ -142,24 +142,29 @@ function sliceCodePointSafe(text: string, start: number, maxChars: number): { te
 
 // --- Tools -------------------------------------------------------------
 
-export const searchAll: ToolDefinition = tool({
+export const searchAll = defineTool<{
+  query: string;
+  limit?: number;
+  directory?: string;
+}>({
+  name: "session_search_all",
   description:
     "Search previous OpenCode, Pi, and Codex sessions concurrently by keyword. " +
     "Unavailable or uninstalled session backends are reported without failing available searches. " +
     "Multi-term queries match sessions containing ANY search term (OR logic); sessions matching more " +
     "terms rank higher. Results are grouped by source; limit applies per source.",
-  args: {
-    query: tool.schema.string().describe("Keyword or phrase to search for"),
-    limit: tool.schema
-      .number()
-      .optional()
-      .describe("Max sessions to return per source (default 10)"),
-    directory: tool.schema
-      .string()
-      .optional()
-      .describe(
-        "Filter to sessions from a specific project directory (substring match)",
-      ),
+  input: {
+    type: "object",
+    properties: {
+      query: { type: "string", description: "Keyword or phrase to search for" },
+      limit: { type: "number", description: "Max sessions to return per source (default 10)" },
+      directory: {
+        type: "string",
+        description: "Filter to sessions from a specific project directory (substring match)",
+      },
+    },
+    required: ["query"],
+    additionalProperties: false,
   },
   async execute({ query, limit = 10, directory }, context) {
     return runAllSessionSearch({
@@ -200,19 +205,29 @@ export async function runAllSessionSearch(
   return searchSessionProviders(request, activeProviders);
 }
 
-export const search: ToolDefinition = tool({
+export const search = defineTool<{
+  query: string;
+  limit?: number;
+  directory?: string;
+}>({
+  name: "session_search",
   description:
     "Search previous OpenCode sessions by keyword. Searches both session titles and message content. " +
     "Multi-term queries match sessions containing ANY search term (OR logic); sessions matching more " +
     "terms rank higher. Returns matching sessions with snippets and a match_offset you can pass to " +
     "session_read to jump directly to the relevant part of a long session.",
-  args: {
-    query: tool.schema.string().describe("Keyword or phrase to search for"),
-    limit: tool.schema.number().optional().describe("Max sessions to return (default 10)"),
-    directory: tool.schema
-      .string()
-      .optional()
-      .describe("Filter to sessions from a specific project directory (substring match)"),
+  input: {
+    type: "object",
+    properties: {
+      query: { type: "string", description: "Keyword or phrase to search for" },
+      limit: { type: "number", description: "Max sessions to return (default 10)" },
+      directory: {
+        type: "string",
+        description: "Filter to sessions from a specific project directory (substring match)",
+      },
+    },
+    required: ["query"],
+    additionalProperties: false,
   },
   async execute({ query, limit = 10, directory }, context) {
     return runSessionSearch({
@@ -359,33 +374,34 @@ export async function runSessionSearch(input: {
   return lines.join("\n");
 }
 
-export const list: ToolDefinition = tool({
+export const list = defineTool<{
+  from?: string;
+  to?: string;
+  directory?: string;
+  limit?: number;
+}>({
+  name: "session_list",
   description:
     "List OpenCode sessions ordered by most-recently-updated, optionally filtered by time range " +
     "and/or project directory. Useful for browsing recent work or finding sessions from a specific period.",
-  args: {
-    from: tool.schema
-      .string()
-      .optional()
-      .describe(
-        "Start of time range, inclusive (ISO 8601, e.g. '2024-01-01' or '2024-01-01T09:00:00')",
-      ),
-    to: tool.schema
-      .string()
-      .optional()
-      .describe(
-        "End of time range, inclusive (ISO 8601, e.g. '2024-01-31' or '2024-01-31T23:59:59')",
-      ),
-    directory: tool.schema
-      .string()
-      .optional()
-      .describe(
-        "Filter to sessions from a specific project directory (substring match)",
-      ),
-    limit: tool.schema
-      .number()
-      .optional()
-      .describe("Max sessions to return (default 20)"),
+  input: {
+    type: "object",
+    properties: {
+      from: {
+        type: "string",
+        description: "Start of time range, inclusive (ISO 8601, e.g. '2024-01-01' or '2024-01-01T09:00:00')",
+      },
+      to: {
+        type: "string",
+        description: "End of time range, inclusive (ISO 8601, e.g. '2024-01-31' or '2024-01-31T23:59:59')",
+      },
+      directory: {
+        type: "string",
+        description: "Filter to sessions from a specific project directory (substring match)",
+      },
+      limit: { type: "number", description: "Max sessions to return (default 20)" },
+    },
+    additionalProperties: false,
   },
   async execute({ from, to, directory, limit = 20 }, context) {
     return runSessionList({
@@ -460,37 +476,43 @@ export async function runSessionList(input: {
   return `Found ${rows.length} session(s):\n\n${lines.join("\n\n")}`;
 }
 
-export const read: ToolDefinition = tool({
+export const read = defineTool<{
+  session_id: string;
+  limit?: number;
+  offset?: number;
+  message_char_offset?: number;
+  role?: "all" | "user" | "assistant";
+}>({
+  name: "session_read",
   description:
     "Read a bounded portion of a previous OpenCode session in order. Returns user and assistant text " +
     "messages, capped at about 16,000 text characters per call. Use offset and limit to page through " +
     "messages; when an individual message is truncated, reuse its offset with the returned " +
     "message_char_offset to continue without losing content. session_search returns a match_offset " +
     "you can use as offset to jump directly to relevant content.",
-  args: {
-    session_id: tool.schema
-      .string()
-      .describe("Session ID (from session_search results)"),
-    limit: tool.schema
-      .number()
-      .optional()
-      .describe("Number of messages to return (default 30)"),
-    offset: tool.schema
-      .number()
-      .optional()
-      .describe(
-        "Skip the first N text messages — use match_offset from session_search to jump to relevant content (default 0)",
-      ),
-    message_char_offset: tool.schema
-      .number()
-      .optional()
-      .describe(
-        "Character offset within the first selected message (default 0); use the continuation value returned when a message exceeds the output bound",
-      ),
-    role: tool.schema
-      .enum(["all", "user", "assistant"])
-      .optional()
-      .describe('Filter by role: "user", "assistant", or "all" (default "all")'),
+  input: {
+    type: "object",
+    properties: {
+      session_id: { type: "string", description: "Session ID (from session_search results)" },
+      limit: { type: "number", description: "Number of messages to return (default 30)" },
+      offset: {
+        type: "number",
+        description:
+          "Skip the first N text messages — use match_offset from session_search to jump to relevant content (default 0)",
+      },
+      message_char_offset: {
+        type: "number",
+        description:
+          "Character offset within the first selected message (default 0); use the continuation value returned when a message exceeds the output bound",
+      },
+      role: {
+        type: "string",
+        enum: ["all", "user", "assistant"],
+        description: 'Filter by role: "user", "assistant", or "all" (default "all")',
+      },
+    },
+    required: ["session_id"],
+    additionalProperties: false,
   },
   async execute(
     { session_id, limit = 30, offset = 0, message_char_offset = 0, role = "all" },
