@@ -48,36 +48,42 @@ Use this when you don't want to install from npm — for example to run a build 
 
 Every release built by the **Build** workflow attaches `opencode-memory-plugin-<version>.tar.gz` (and a `.zip`). It contains `index.js`, `dist/`, `skills/`, and `package.json` — everything except the platform-specific binaries, which you fetch in step 2.
 
-**1. Extract it into a plugins directory.** Global (all projects):
+> **Install the dependencies _before_ moving the plugin into place.** OpenCode watches its plugin
+> directories and loads a plugin the moment it appears. If it loads before `node_modules/` exists, Bun
+> caches a failed module resolution for that directory and the search backends stay unavailable until the
+> server is restarted — `memory_search` then returns nothing even when memories exist. Staging first
+> avoids the problem entirely.
+
+**1. Extract into a staging directory** — anywhere *outside* a plugins directory:
+
+```bash
+tar -xzf ~/Downloads/opencode-memory-plugin-1.3.0-rc.1.tar.gz -C /tmp
+```
+
+**2. Install the search backends.** ripgrep and rag-cli ship per-platform binaries, so they're pulled for your machine rather than baked into the archive:
+
+```bash
+cd /tmp/opencode-memory
+bun install --production --omit=peer --omit=dev
+```
+
+Skipping `--omit=peer` pulls in the optional typing peers and inflates the directory from ~46MB to ~640MB. If you'd rather use npm: `npm install --omit=dev --omit=peer`.
+
+**3. Move it into a plugins directory.** Global (all projects):
 
 ```bash
 mkdir -p ~/.config/opencode/plugins
-tar -xzf ~/Downloads/opencode-memory-plugin-1.3.0-rc.1.tar.gz -C ~/.config/opencode/plugins
+mv /tmp/opencode-memory ~/.config/opencode/plugins/
 ```
 
 Or per project, if you only want it in one repo:
 
 ```bash
 mkdir -p .opencode/plugins
-tar -xzf ~/Downloads/opencode-memory-plugin-1.3.0-rc.1.tar.gz -C .opencode/plugins
+mv /tmp/opencode-memory .opencode/plugins/
 ```
 
 Either way you end up with a directory named `opencode-memory/` containing `index.js`. OpenCode discovers plugin directories by that root `index.js`, so don't flatten or rename it.
-
-**2. Install the search backends** — ripgrep and rag-cli ship per-platform binaries, so they're pulled for your machine rather than baked into the archive:
-
-```bash
-cd ~/.config/opencode/plugins/opencode-memory   # or .opencode/plugins/opencode-memory
-bun install --production --omit=peer --omit=dev
-```
-
-Skipping `--omit=peer` pulls in the optional typing peers and inflates the directory from ~46MB to ~640MB. If you'd rather use npm: `npm install --omit=dev --omit=peer`.
-
-**3. Restart OpenCode** so it picks up the new plugin:
-
-```bash
-opencode service restart
-```
 
 **4. Verify it loaded:**
 
@@ -85,9 +91,11 @@ opencode service restart
 opencode plugin list
 ```
 
-You should see `opencode-memory` listed as active. Then run the bootstrap step below to create the memory directory.
+You should see `opencode-memory` listed as active — no restart needed, since the plugin arrived complete. Then run the bootstrap step below to create the memory directory.
 
-To update, delete the `opencode-memory/` directory and repeat. To uninstall, delete it and restart the service.
+If you installed in the wrong order and `memory_setup` reports the backends as `NOT resolvable`, run `opencode service restart` once; the cached resolution failure clears with the process.
+
+To update, delete the `opencode-memory/` directory and repeat from step 1. To uninstall, delete it and restart the service.
 
 ### Manual install (from source)
 
@@ -109,7 +117,20 @@ Then bootstrap the memory directory + embedding model + skill:
 bunx @mathew-cf/opencode-memory init
 ```
 
+If you installed manually from a release (so the package isn't on npm), run the bundled CLI instead:
+
+```bash
+bun ~/.config/opencode/plugins/opencode-memory/dist/cli.js init
+```
+
 This creates `~/opencode-memory/` (git repo, 7 category subdirs), downloads the ~90MB embedding model, and symlinks the bundled skill into `~/.agents/skills/opencode-memory` (where Zed and Pi look). Idempotent — safe to re-run. Pass `--skip-model` to defer the download, `--skip-skills` to skip the symlink.
+
+If you deferred the model, fetch it later with the bundled rag shim:
+
+```bash
+cd ~/.config/opencode/plugins/opencode-memory
+bun node_modules/@mathew-cf/rag-cli/bin/rag.js download
+```
 
 The plugin also auto-registers (OpenCode only):
 

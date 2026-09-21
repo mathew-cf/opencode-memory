@@ -164,6 +164,15 @@ Neither runs on push. `dist/` and `build/` are gitignored, so a plain `git push`
 
 The GitHub-release payload exists because a `github:` dependency install does **not** build: the fetched repo has no `dist/`, and Bun blocks lifecycle scripts for git dependencies, so a `prepare` script can't cover for it.
 
+### Plugin dependency resolution
+
+`resolveRgBinary()` and `resolveRagBinary()` use `createRequire(import.meta.url)`, so the two search backends are found by walking up from the loaded module to the nearest `node_modules`. Two consequences worth knowing:
+
+- **Bun caches module resolution per directory for the life of the process.** If a plugin is loaded before its `node_modules` exists — which is what happens when you extract an archive straight into a watched `plugins/` directory — the failed lookup is cached, and neither a plugin reload nor a `dist/node_modules` symlink clears it. Only restarting the server does. Manual installs must therefore install dependencies *before* the payload is moved into place.
+- A degraded install fails quietly: `memory_search` reports no results rather than erroring. `memory_setup` is the diagnostic — it prints the resolved paths or the install guidance.
+
+A fallback that resolves the binaries through `import.meta.dir`-relative filesystem paths would make this ordering irrelevant; the current code relies on module resolution alone.
+
 Versions are synced into README.md automatically via `scripts/sync-version.ts`:
 
 ```bash
