@@ -27,7 +27,7 @@ OpenCode 2:
 ```jsonc
 // opencode.jsonc
 {
-  "plugins": ["@mathew-cf/opencode-memory@1.2.1"]
+  "plugins": ["@mathew-cf/opencode-memory@1.3.0-rc.1"]
 }
 ```
 
@@ -36,7 +36,7 @@ OpenCode 1:
 ```jsonc
 // opencode.jsonc
 {
-  "plugin": ["@mathew-cf/opencode-memory@1.2.1"]
+  "plugin": ["@mathew-cf/opencode-memory@1.3.0-rc.1"]
 }
 ```
 
@@ -52,14 +52,14 @@ Every release built by the **Build** workflow attaches `opencode-memory-plugin-<
 
 ```bash
 mkdir -p ~/.config/opencode/plugins
-tar -xzf ~/Downloads/opencode-memory-plugin-1.2.1.tar.gz -C ~/.config/opencode/plugins
+tar -xzf ~/Downloads/opencode-memory-plugin-1.3.0-rc.1.tar.gz -C ~/.config/opencode/plugins
 ```
 
 Or per project, if you only want it in one repo:
 
 ```bash
 mkdir -p .opencode/plugins
-tar -xzf ~/Downloads/opencode-memory-plugin-1.2.1.tar.gz -C .opencode/plugins
+tar -xzf ~/Downloads/opencode-memory-plugin-1.3.0-rc.1.tar.gz -C .opencode/plugins
 ```
 
 Either way you end up with a directory named `opencode-memory/` containing `index.js`. OpenCode discovers plugin directories by that root `index.js`, so don't flatten or rename it.
