@@ -95,10 +95,13 @@ trap 'rm -rf "$TMP"' EXIT
 
 api() {
   # GH_TOKEN is optional; it only raises the anonymous rate limit.
+  # --retry covers the transient 5xx responses GitHub's CDN occasionally
+  # returns; --retry-all-errors also catches connection resets.
+  local retry=(--retry 5 --retry-delay 2 --retry-all-errors)
   if [ -n "${GH_TOKEN:-}" ]; then
-    curl -fsSL -H "Authorization: Bearer ${GH_TOKEN}" "$@"
+    curl -fsSL "${retry[@]}" -H "Authorization: Bearer ${GH_TOKEN}" "$@"
   else
-    curl -fsSL "$@"
+    curl -fsSL "${retry[@]}" "$@"
   fi
 }
 
@@ -122,7 +125,15 @@ ASSET_URL="$(printf '%s' "$RELEASE_JSON" \
   will not work because it contains no dist/ directory."
 
 log "Downloading $(basename "$ASSET_URL")"
-curl -fsSL -o "$TMP/payload.tar.gz" "$ASSET_URL"
+curl -fsSL --retry 5 --retry-delay 2 --retry-all-errors -o "$TMP/payload.tar.gz" "$ASSET_URL" \
+  || die "download failed. GitHub's asset CDN returns a transient 504 now and then —
+  retry in a minute, or fetch it by hand:
+    curl -fLO $ASSET_URL"
+
+# A truncated or error-page download would otherwise fail later in a much
+# more confusing way.
+tar -tzf "$TMP/payload.tar.gz" >/dev/null 2>&1 \
+  || die "downloaded file is not a valid archive — retry the download"
 
 # --- stage and install dependencies (before going live) ---------------
 
