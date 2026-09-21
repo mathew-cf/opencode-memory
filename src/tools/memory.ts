@@ -6,7 +6,6 @@
  * `$OPENCODE_MEMORY_DIR` before importing.
  */
 
-import { tool, type ToolDefinition } from "@opencode-ai/plugin";
 import { Database } from "bun:sqlite";
 import { mkdirSync } from "node:fs";
 import { realpath } from "node:fs/promises";
@@ -24,6 +23,7 @@ import {
 import { installGuidance, ragAvailable, ragSearch, resolveRagBinary, spawnRagIndex } from "../lib/rag";
 import { resolveRgBinary, rgInstallGuidance } from "../lib/ripgrep";
 import { countTermMatches, parseSearchTerms, scoreCandidate } from "../lib/search-terms";
+import { defineTool } from "../lib/tool-spec";
 
 // --- Internal helpers ---------------------------------------------------
 
@@ -179,18 +179,30 @@ export function memorySaveDescription(memoryDir?: string): string {
 
 // --- Tools --------------------------------------------------------------
 
-export const search: ToolDefinition = tool({
+export const search = defineTool<{
+  query: string;
+  category?: string;
+  detail?: MemorySearchDetail;
+}>({
+  name: "memory_search",
   description: memorySearchDescription(),
-  args: {
-    query: tool.schema.string().describe("Search terms or natural language query"),
-    category: tool.schema
-      .enum(CATEGORIES)
-      .optional()
-      .describe("Filter to a specific memory category"),
-    detail: tool.schema
-      .enum(["compact", "normal", "debug"])
-      .optional()
-      .describe('Output detail: "compact", "normal" (default), or "debug" for ranking diagnostics'),
+  input: {
+    type: "object",
+    properties: {
+      query: { type: "string", description: "Search terms or natural language query" },
+      category: {
+        type: "string",
+        enum: CATEGORIES,
+        description: "Filter to a specific memory category",
+      },
+      detail: {
+        type: "string",
+        enum: ["compact", "normal", "debug"],
+        description: 'Output detail: "compact", "normal" (default), or "debug" for ranking diagnostics',
+      },
+    },
+    required: ["query"],
+    additionalProperties: false,
   },
   async execute({ query, category, detail = "normal" }) {
     return runSearch({ query, category, detail });
@@ -422,13 +434,15 @@ export async function runSearch(input: {
   return lines.join("\n");
 }
 
-export const list: ToolDefinition = tool({
+export const list = defineTool<{ category?: string }>({
+  name: "memory_list",
   description: memoryListDescription(),
-  args: {
-    category: tool.schema
-      .enum(CATEGORIES)
-      .optional()
-      .describe("Memory category to list"),
+  input: {
+    type: "object",
+    properties: {
+      category: { type: "string", enum: CATEGORIES, description: "Memory category to list" },
+    },
+    additionalProperties: false,
   },
   async execute({ category }) {
     return runList({ category });
@@ -571,25 +585,37 @@ async function resolveRealPathContained(memoryDir: string, filePath: string): Pr
   return realFile;
 }
 
-export const read: ToolDefinition = tool({
+export const read = defineTool<{
+  path: string;
+  heading?: string;
+  offset?: number;
+  max_chars?: number;
+}>({
+  name: "memory_read",
   description:
     "Read a bounded portion of one memory file and automatically record successful access. " +
     "Returns frontmatter plus either the named Markdown heading section or the beginning of the body, " +
     "with truncation/continuation metadata. Prefer this over the general Read tool after memory_search.",
-  args: {
-    path: tool.schema.string().describe(memoryAccessPathDescription()),
-    heading: tool.schema
-      .string()
-      .optional()
-      .describe('Optional Markdown heading text to select (for example, "Build and test")'),
-    offset: tool.schema
-      .number()
-      .optional()
-      .describe("Character offset within the selected body or heading section (default 0)"),
-    max_chars: tool.schema
-      .number()
-      .optional()
-      .describe("Maximum memory-content characters to return, including bounded frontmatter (default 4000, maximum 16000)"),
+  input: {
+    type: "object",
+    properties: {
+      path: { type: "string", description: memoryAccessPathDescription() },
+      heading: {
+        type: "string",
+        description: 'Optional Markdown heading text to select (for example, "Build and test")',
+      },
+      offset: {
+        type: "number",
+        description: "Character offset within the selected body or heading section (default 0)",
+      },
+      max_chars: {
+        type: "number",
+        description:
+          "Maximum memory-content characters to return, including bounded frontmatter (default 4000, maximum 16000)",
+      },
+    },
+    required: ["path"],
+    additionalProperties: false,
   },
   async execute({ path, heading, offset = 0, max_chars = DEFAULT_READ_CHARS }) {
     return runRead({ path, heading, offset, maxChars: max_chars });
@@ -656,14 +682,20 @@ export async function runRead(input: {
   return `${memoryContent}${memoryContent.endsWith("\n") ? "" : "\n"}\n---\n${metadata}`;
 }
 
-export const access: ToolDefinition = tool({
+export const access = defineTool<{ path: string }>({
+  name: "memory_access",
   description:
     "Record that a memory file was accessed (read and used). Updates sidecar access telemetry " +
     "without rewriting the memory file. Call this AFTER reading a memory file " +
     "that you actually used to inform your work — not for casual browsing.\n\n" +
     "This helps the memory system track which memories are actively useful vs. stale.",
-  args: {
-    path: tool.schema.string().describe(memoryAccessPathDescription()),
+  input: {
+    type: "object",
+    properties: {
+      path: { type: "string", description: memoryAccessPathDescription() },
+    },
+    required: ["path"],
+    additionalProperties: false,
   },
   async execute({ path }) {
     return runAccess({ path });
@@ -700,9 +732,10 @@ export async function runAccess(input: { path: string }): Promise<string> {
   }
 }
 
-export const save: ToolDefinition = tool({
+export const save = defineTool<Record<string, never>>({
+  name: "memory_save",
   description: memorySaveDescription(),
-  args: {},
+  input: { type: "object", properties: {}, additionalProperties: false },
   async execute() {
     return runSave();
   },
@@ -739,12 +772,13 @@ export async function runSave(): Promise<string> {
   return kickedOffIndex ? result : `${result}\n\n${installGuidance()}`;
 }
 
-export const setup: ToolDefinition = tool({
+export const setup = defineTool<Record<string, never>>({
+  name: "memory_setup",
   description:
     "Reports whether `@mathew-cf/rag-cli` is resolvable from this plugin's " +
     "node_modules and prints installation guidance if not. Safe to run at " +
     "any time — does not modify anything.",
-  args: {},
+  input: { type: "object", properties: {}, additionalProperties: false },
   async execute() {
     return runSetup();
   },

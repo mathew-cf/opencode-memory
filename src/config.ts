@@ -86,6 +86,75 @@ export const EXPLORE_PERMISSIONS: Record<string, string> = {
   session_list: "allow",
 };
 
+/**
+ * A single OpenCode V2 permission rule. V1 expressed the same intent as a
+ * `{ pattern: effect }` map; V2 uses an ordered array where the last matching
+ * rule wins, so our rules are always appended.
+ */
+export interface PermissionRule {
+  action: string;
+  resource: string;
+  effect: "allow" | "deny" | "ask";
+}
+
+/** The minimal slice of a V2 `Agent.Info` this plugin edits. */
+export interface AgentLike {
+  id: string;
+  system?: string;
+  permissions: PermissionRule[];
+}
+
+/** Edit + external-directory access to the memory tree, as V2 rules. */
+export function memoryDirPermissionRules(memoryDir: string): PermissionRule[] {
+  const memoryGlob = posix.join(normalizeDirPath(memoryDir), "**");
+  return [
+    { action: "edit", resource: memoryGlob, effect: "allow" },
+    { action: "external_directory", resource: memoryGlob, effect: "allow" },
+  ];
+}
+
+/** {@link EXPLORE_PERMISSIONS} expressed as V2 rules. */
+export function exploreToolPermissionRules(): PermissionRule[] {
+  return Object.entries(EXPLORE_PERMISSIONS).map(([action, effect]) => ({
+    action,
+    resource: "*",
+    effect: effect as PermissionRule["effect"],
+  }));
+}
+
+function appendRules(permissions: PermissionRule[], rules: PermissionRule[]): void {
+  for (const rule of rules) {
+    const present = permissions.some((existing) => existing.action === rule.action && existing.resource === rule.resource);
+    if (!present) permissions.push(rule);
+  }
+}
+
+/**
+ * The V2 counterpart of {@link applyConfig}'s agent section, applied through
+ * `ctx.agent.transform`. Call it for every agent: memory-directory access is
+ * granted to all of them (V1 got that from the global `permission` config,
+ * which V2 replaces with per-domain rules), while the prompt appendix and the
+ * explore tool allowlist stay scoped to {@link TARGET_AGENTS}.
+ *
+ * Like the V1 path, this is additive: an existing `system` prompt is prepended
+ * to rather than replaced, and duplicate rules are never appended twice.
+ */
+export function applyAgentConfigV2(agent: AgentLike, options: { memoryDir?: string } = {}): void {
+  const memoryDir = normalizeDirPath(options.memoryDir ?? resolveMemoryDir());
+  appendRules(agent.permissions, memoryDirPermissionRules(memoryDir));
+
+  if (!(TARGET_AGENTS as readonly string[]).includes(agent.id)) return;
+
+  const prefix = buildMemoryPromptAppendix(memoryDir);
+  if (!agent.system) {
+    agent.system = prefix;
+  } else if (!agent.system.includes("memory_search")) {
+    agent.system = `${prefix}\n\n${agent.system}`;
+  }
+
+  if (agent.id === "explore") appendRules(agent.permissions, exploreToolPermissionRules());
+}
+
 interface ConfigLike {
   agent?: Record<string, unknown>;
   skills?: { paths?: string[]; urls?: string[] };

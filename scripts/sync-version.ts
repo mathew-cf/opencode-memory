@@ -30,8 +30,16 @@ const versionPattern = new RegExp(
   "g",
 );
 
+// Match the manual-install archive names produced by scripts/pack-plugin.ts,
+// e.g. opencode-memory-plugin-1.2.1.tar.gz — otherwise the manual install
+// instructions would keep pointing at whatever version shipped first.
+const archivePattern = /opencode-memory-plugin-\d+\.\d+\.\d+/g;
+
 const newVersionString = `${packageName}@${version}`;
-const updatedReadme = readme.replace(versionPattern, newVersionString);
+const updatedReadme = readme
+  .replace(versionPattern, newVersionString)
+  .replace(archivePattern, `opencode-memory-plugin-${version}`);
+
 
 if (readme !== updatedReadme) {
   writeFileSync(readmePath, updatedReadme);

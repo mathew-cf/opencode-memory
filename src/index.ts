@@ -4,8 +4,11 @@
  * Wires up:
  *  - 6 memory tools (search / read / list / save / access / setup)
  *  - Session tools (cross-harness search plus OpenCode search / read / list)
- *  - 2 hooks (tool.execute.after guard + compaction context injection)
- *  - Config modifications (skill path, agent prompts, permission rules)
+ *  - 2 hooks (tool-call guard + compaction context injection)
+ *  - Config modifications (skill registration, agent prompts, permissions)
+ *
+ * The default export serves both plugin APIs: OpenCode V1 calls `server()`,
+ * OpenCode V2 reads `id` + `setup()`. See `src/v2.ts` for the V2 wiring.
  */
 
 import type { Plugin } from "@opencode-ai/plugin";
@@ -13,8 +16,8 @@ import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { applyConfig } from "./config";
 import { createGuardHooks } from "./hooks/guard";
-import * as memory from "./tools/memory";
-import * as session from "./tools/session";
+import { v1ToolMap } from "./tools";
+import { createV2Plugin, PLUGIN_ID } from "./v2";
 
 /**
  * Locate the `skills/` directory that ships with this package. Works
@@ -42,25 +45,10 @@ function resolveSkillsDir(): string | undefined {
 const MemoryPlugin: Plugin = async () => {
   const guard = createGuardHooks();
 
-  // Tool names — each export becomes `<prefix>_<exportname>`. We use
-  // the `memory_` and `session_` prefixes directly via the namespaced
-  // tool map so agents can call `memory_search` rather than
-  // `opencode-memory_search` etc.
-  const tools = {
-    memory_search: memory.search,
-    memory_read: memory.read,
-    memory_list: memory.list,
-    memory_save: memory.save,
-    memory_access: memory.access,
-    memory_setup: memory.setup,
-    session_search: session.search,
-    session_search_all: session.searchAll,
-    session_read: session.read,
-    session_list: session.list,
-  };
-
   return {
-    tool: tools,
+    // Tool names come from the registry, so agents call `memory_search`
+    // rather than `opencode-memory_search` etc.
+    tool: v1ToolMap(),
 
     config: async (config: Record<string, unknown>) => {
       const skillsDir = resolveSkillsDir();
@@ -75,23 +63,37 @@ const MemoryPlugin: Plugin = async () => {
 };
 
 /**
- * Default export uses the V1 plugin format — a record with `id` + `server`.
+ * Default export supports both plugin APIs from one entrypoint.
  *
- * OpenCode's plugin loader first tries V1 (`readV1Plugin`): if `default` is
- * a record with `id`/`server`/`tui`, it uses only those. Otherwise it falls
- * back to "legacy" detection which iterates EVERY named export and requires
- * each to be a function — so a single non-function re-export (e.g. the
+ * OpenCode V1's loader first tries `readV1Plugin`: if `default` is a record
+ * with `id`/`server`/`tui`, it uses only those. Otherwise it falls back to
+ * "legacy" detection which iterates EVERY named export and requires each to
+ * be a function — so a single non-function re-export (e.g. the
  * `MEMORY_PROMPT_APPENDIX` string below) would abort plugin load with a
- * TypeError. Shipping V1 keeps the named helper re-exports safe because the
- * loader never iterates them.
+ * TypeError. Shipping the record form keeps the named helper re-exports safe
+ * because the loader never iterates them.
+ *
+ * OpenCode V2 reads `id` + `setup()` from the same record and ignores
+ * `server()`.
  */
 export default {
-  id: "opencode-memory",
+  ...createV2Plugin({ skillsDir: resolveSkillsDir() }),
+  id: PLUGIN_ID,
   server: MemoryPlugin,
 };
 
 // Re-exports for power users who want to wire pieces into their own plugin.
-export { applyConfig, BUILTIN_SUBAGENTS, MEMORY_PROMPT_APPENDIX, TARGET_AGENTS } from "./config";
+export {
+  applyAgentConfigV2,
+  applyConfig,
+  BUILTIN_SUBAGENTS,
+  exploreToolPermissionRules,
+  MEMORY_PROMPT_APPENDIX,
+  memoryDirPermissionRules,
+  TARGET_AGENTS,
+  type AgentLike,
+  type PermissionRule,
+} from "./config";
 export {
   afterToolUpdate,
   buildCompactionContext,
@@ -100,5 +102,8 @@ export {
   matchesToolName,
   type SessionState,
 } from "./hooks/guard";
+export { defineTool, type MemoryTool, type ToolSpec } from "./lib/tool-spec";
+export { allTools, v1ToolMap } from "./tools";
 export * as memoryTools from "./tools/memory";
 export * as sessionTools from "./tools/session";
+export { createV2Plugin, loadBundledSkills, PLUGIN_ID } from "./v2";

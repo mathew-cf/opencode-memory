@@ -71,6 +71,27 @@ export function parseFrontmatter(content: string): {
 }
 
 /**
+ * Parse a `SKILL.md` frontmatter block. Skills use a different vocabulary
+ * than memory files (`name` / `description`), so they get their own tiny
+ * reader rather than widening {@link FrontMatter}. Values are single-line
+ * scalars with optional surrounding quotes — the only form the bundled and
+ * user-authored skills use.
+ */
+export function parseSkillFrontmatter(content: string): { name?: string; description?: string } {
+  const match = content.match(FRONTMATTER_RE);
+  if (!match) return {};
+
+  const result: { name?: string; description?: string } = {};
+  for (const line of match[1].split("\n")) {
+    const kv = line.match(/^(name|description):\s*(.+)$/);
+    if (!kv) continue;
+    const value = kv[2].trim().replace(/^["'](.*)["']$/, "$1");
+    if (value) result[kv[1] as "name" | "description"] = value;
+  }
+  return result;
+}
+
+/**
  * Update or insert the `last_accessed` and `access_count` fields in a YAML
  * block. Returns the new YAML string. The caller is responsible for gluing
  * it back onto the body with the `---` sentinels.

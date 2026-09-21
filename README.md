@@ -22,12 +22,86 @@ LLM agents forget everything between sessions. That means rediscovering the same
 
 ### OpenCode
 
+OpenCode 2:
+
+```jsonc
+// opencode.jsonc
+{
+  "plugins": ["@mathew-cf/opencode-memory@1.2.1"]
+}
+```
+
+OpenCode 1:
+
 ```jsonc
 // opencode.jsonc
 {
   "plugin": ["@mathew-cf/opencode-memory@1.2.1"]
 }
 ```
+
+One package serves both: the default export exposes a V1 `server()` and a V2 `setup()`, so the same version works on either release.
+
+### Manual install (from a GitHub release)
+
+Use this when you don't want to install from npm — for example to run a build straight off a fork or a branch.
+
+Every release built by the **Build** workflow attaches `opencode-memory-plugin-<version>.tar.gz` (and a `.zip`). It contains `index.js`, `dist/`, `skills/`, and `package.json` — everything except the platform-specific binaries, which you fetch in step 2.
+
+**1. Extract it into a plugins directory.** Global (all projects):
+
+```bash
+mkdir -p ~/.config/opencode/plugins
+tar -xzf ~/Downloads/opencode-memory-plugin-1.2.1.tar.gz -C ~/.config/opencode/plugins
+```
+
+Or per project, if you only want it in one repo:
+
+```bash
+mkdir -p .opencode/plugins
+tar -xzf ~/Downloads/opencode-memory-plugin-1.2.1.tar.gz -C .opencode/plugins
+```
+
+Either way you end up with a directory named `opencode-memory/` containing `index.js`. OpenCode discovers plugin directories by that root `index.js`, so don't flatten or rename it.
+
+**2. Install the search backends** — ripgrep and rag-cli ship per-platform binaries, so they're pulled for your machine rather than baked into the archive:
+
+```bash
+cd ~/.config/opencode/plugins/opencode-memory   # or .opencode/plugins/opencode-memory
+bun install --production --omit=peer --omit=dev
+```
+
+Skipping `--omit=peer` pulls in the optional typing peers and inflates the directory from ~46MB to ~640MB. If you'd rather use npm: `npm install --omit=dev --omit=peer`.
+
+**3. Restart OpenCode** so it picks up the new plugin:
+
+```bash
+opencode service restart
+```
+
+**4. Verify it loaded:**
+
+```bash
+opencode plugin list
+```
+
+You should see `opencode-memory` listed as active. Then run the bootstrap step below to create the memory directory.
+
+To update, delete the `opencode-memory/` directory and repeat. To uninstall, delete it and restart the service.
+
+### Manual install (from source)
+
+If you have the repository checked out, build it and point a loader file at the result:
+
+```bash
+bun install && bun run build
+mkdir -p ~/.config/opencode/plugins
+echo 'export { default } from "/absolute/path/to/opencode-memory/dist/index.js"' \
+  > ~/.config/opencode/plugins/opencode-memory.ts
+opencode service restart
+```
+
+A single `.ts` or `.js` file works as well as a directory. This route reuses the repository's own `node_modules`, so there's no second install step — but the plugin breaks if you move, delete, or `git checkout` away from that build.
 
 Then bootstrap the memory directory + embedding model + skill:
 
@@ -39,9 +113,11 @@ This creates `~/opencode-memory/` (git repo, 7 category subdirs), downloads the 
 
 The plugin also auto-registers (OpenCode only):
 
-- its bundled skill under `config.skills.paths`
+- its bundled skill (V1: `config.skills.paths`; V2: a skill transform)
 - edit + external-directory permissions for `~/opencode-memory/**`
 - memory-aware prompt prefixes on the five built-in subagents (only when their prompt isn't already set)
+
+On OpenCode 2 the memory-directory permissions are attached to every agent, because V2 replaces the single global `permission` block with per-domain rules.
 
 ### Search backends
 
@@ -134,9 +210,9 @@ See the bundled skill (`skills/opencode-memory/SKILL.md`) for the full protocol.
 
 ## How the guard hook works
 
-The plugin installs two hooks:
+The plugin installs two hooks (V1 names first, V2 equivalents in parentheses):
 
-### `tool.execute.after`
+### `tool.execute.after` (V2: `ctx.tool.hook("execute.after")`)
 Tracks tool usage per session and injects short reminders into tool output when:
 
 - **8 tool calls deep with no search**: reminds the agent to call `memory_search` and `session_search` before going further.
@@ -144,7 +220,7 @@ Tracks tool usage per session and injects short reminders into tool output when:
 
 Reminders fire at most once per session each to avoid spam.
 
-### `experimental.session.compacting`
+### `experimental.session.compacting` (V2: `ctx.session.hook("compaction")`)
 Injects memory-specific preservation rules so references to saved files and search results survive summarization. If the session is >10 tool calls and never called `memory_save`, adds a retrospective reminder.
 
 ## Development
@@ -152,7 +228,7 @@ Injects memory-specific preservation rules so references to saved files and sear
 ```bash
 bun install
 bun run typecheck    # tsc --noEmit
-bun test             # 118 tests across 7 files
+bun test             # 236 tests across 14 files
 bun run build        # bundle to dist/
 ```
 
