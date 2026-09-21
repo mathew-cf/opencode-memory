@@ -29,6 +29,22 @@ jobs:
     steps:
       - uses: actions/checkout@v5
 
+      # Fail fast: the packed archive is named from package.json, so a tag
+      # that disagrees with it would publish e.g. a v1.3.0 release
+      # containing opencode-memory-plugin-1.2.1.tar.gz.
+      - name: Check tag matches package.json version
+        env:
+          TAG: ${{ inputs.tag }}
+        run: |
+          PKG=$(node -p "require('./package.json').version")
+          if [ "$TAG" != "v$PKG" ] && [ "$TAG" != "$PKG" ]; then
+            echo "::error::Tag '$TAG' does not match package.json version '$PKG'."
+            echo "Bump the version first, then re-run:"
+            echo "  npm version patch   # or minor / major"
+            echo "  git push --follow-tags"
+            exit 1
+          fi
+
       - uses: oven-sh/setup-bun@v2
 
       - run: bun install --frozen-lockfile
