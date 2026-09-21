@@ -1,0 +1,62 @@
+name: Build
+
+# Manual build + GitHub release. This is the "install without npm" path:
+# it attaches a ready-to-extract plugin payload to a GitHub release so the
+# plugin can be installed by hand, without publishing to a registry.
+#
+# The separate `release.yml` workflow is the npm path — use that one when
+# you want a real versioned package on the registry.
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag to create (e.g. v1.3.0 or v1.3.0-rc.1)"
+        required: true
+        type: string
+      prerelease:
+        description: "Mark the release as a prerelease"
+        required: false
+        default: true
+        type: boolean
+
+jobs:
+  build:
+    name: Build + publish GitHub release
+    runs-on: ubuntu-latest
+    permissions:
+      # Required to create the release and upload assets.
+      contents: write
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: oven-sh/setup-bun@v2
+
+      - run: bun install --frozen-lockfile
+
+      # Same gates as the npm release workflow — never publish an artifact
+      # that wouldn't pass CI.
+      - run: bun run typecheck
+      - run: bun test
+      - run: bun run build
+
+      # Assembles build/opencode-memory/ (index.js + dist + skills +
+      # package.json) plus .tar.gz and .zip archives of it.
+      - run: bun run pack:plugin
+
+      - name: Create GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ inputs.tag }}
+          PRERELEASE: ${{ inputs.prerelease }}
+        run: |
+          # GitHub attaches "Source code (zip)" and "(tar.gz)" to every
+          # release automatically, so only the build output is uploaded here.
+          flags=()
+          if [ "$PRERELEASE" = "true" ]; then flags+=(--prerelease); fi
+          gh release create "$TAG" \
+            --target "$GITHUB_SHA" \
+            --title "$TAG" \
+            --generate-notes \
+            "${flags[@]}" \
+            build/opencode-memory-plugin-*.tar.gz \
+            build/opencode-memory-plugin-*.zip

@@ -42,6 +42,67 @@ OpenCode 1:
 
 One package serves both: the default export exposes a V1 `server()` and a V2 `setup()`, so the same version works on either release.
 
+### Manual install (from a GitHub release)
+
+Use this when you don't want to install from npm — for example to run a build straight off a fork or a branch.
+
+Every release built by the **Build** workflow attaches `opencode-memory-plugin-<version>.tar.gz` (and a `.zip`). It contains `index.js`, `dist/`, `skills/`, and `package.json` — everything except the platform-specific binaries, which you fetch in step 2.
+
+**1. Extract it into a plugins directory.** Global (all projects):
+
+```bash
+mkdir -p ~/.config/opencode/plugins
+tar -xzf ~/Downloads/opencode-memory-plugin-1.2.1.tar.gz -C ~/.config/opencode/plugins
+```
+
+Or per project, if you only want it in one repo:
+
+```bash
+mkdir -p .opencode/plugins
+tar -xzf ~/Downloads/opencode-memory-plugin-1.2.1.tar.gz -C .opencode/plugins
+```
+
+Either way you end up with a directory named `opencode-memory/` containing `index.js`. OpenCode discovers plugin directories by that root `index.js`, so don't flatten or rename it.
+
+**2. Install the search backends** — ripgrep and rag-cli ship per-platform binaries, so they're pulled for your machine rather than baked into the archive:
+
+```bash
+cd ~/.config/opencode/plugins/opencode-memory   # or .opencode/plugins/opencode-memory
+bun install --production --omit=peer --omit=dev
+```
+
+Skipping `--omit=peer` pulls in the optional typing peers and inflates the directory from ~46MB to ~640MB. If you'd rather use npm: `npm install --omit=dev --omit=peer`.
+
+**3. Restart OpenCode** so it picks up the new plugin:
+
+```bash
+opencode service restart
+```
+
+**4. Verify it loaded:**
+
+```bash
+opencode plugin list
+```
+
+You should see `opencode-memory` listed as active. Then run the bootstrap step below to create the memory directory.
+
+To update, delete the `opencode-memory/` directory and repeat. To uninstall, delete it and restart the service.
+
+### Manual install (from source)
+
+If you have the repository checked out, build it and point a loader file at the result:
+
+```bash
+bun install && bun run build
+mkdir -p ~/.config/opencode/plugins
+echo 'export { default } from "/absolute/path/to/opencode-memory/dist/index.js"' \
+  > ~/.config/opencode/plugins/opencode-memory.ts
+opencode service restart
+```
+
+A single `.ts` or `.js` file works as well as a directory. This route reuses the repository's own `node_modules`, so there's no second install step — but the plugin breaks if you move, delete, or `git checkout` away from that build.
+
 Then bootstrap the memory directory + embedding model + skill:
 
 ```bash

@@ -9,6 +9,7 @@ Conventions for agents working on the `@mathew-cf/opencode-memory` codebase.
 | `bun test`           | Run all tests (`bun:test`)                |
 | `bun run typecheck`  | TypeScript check (`tsc --noEmit`)         |
 | `bun run build`      | Bundle to `dist/` + emit `.d.ts`          |
+| `bun run pack:plugin`| Assemble `build/` payload + archives      |
 
 Run all three before committing:
 
@@ -57,6 +58,7 @@ skills/
     SKILL.md            # The bundled skill, auto-registered at plugin load
 scripts/
   sync-version.ts       # Sync package.json version into README.md
+  pack-plugin.ts        # Assemble build/ payload for manual installs
 ```
 
 ## Architecture
@@ -150,6 +152,17 @@ The `rag` CLI is optional. `ensureRag()` silently tries a `cargo install` fallba
 6. If the tool needs a new permission or a new agent prompt, update `src/config.ts` plus `test/config.test.ts` (V1) and `test/config-v2.test.ts` (V2).
 
 ## Publishing
+
+Two independent distribution paths:
+
+| Path | Workflow | Trigger | Output |
+| ---- | -------- | ------- | ------ |
+| npm | `.github/workflows/release.yml` | manual, pick a bump | published package (trusted publishing + provenance) |
+| GitHub release | `.github/workflows/build.yml` | manual, pick a tag | `opencode-memory-plugin-<version>.tar.gz` / `.zip` for manual installs |
+
+Neither runs on push. `dist/` and `build/` are gitignored, so a plain `git push` produces no installable artifact.
+
+The GitHub-release payload exists because a `github:` dependency install does **not** build: the fetched repo has no `dist/`, and Bun blocks lifecycle scripts for git dependencies, so a `prepare` script can't cover for it.
 
 Versions are synced into README.md automatically via `scripts/sync-version.ts`:
 

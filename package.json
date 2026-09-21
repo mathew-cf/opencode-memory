@@ -35,6 +35,7 @@
     "prepublishOnly": "bun run build",
     "typecheck": "tsc --noEmit",
     "sync-version": "bun scripts/sync-version.ts",
+    "pack:plugin": "bun scripts/pack-plugin.ts",
     "version": "bun run sync-version && git add README.md"
   },
   "keywords": [
