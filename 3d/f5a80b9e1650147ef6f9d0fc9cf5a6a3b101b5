@@ -1,0 +1,33 @@
+AGENTS.md
+  s_7819f6de7b51ae::t_4df6613a14a14b 23-24,34,59,63-64,67,71,83,99,116-117
+README.md
+  s_7819f6de7b51ae::t_854c64e5438e8e 26-28
+src/index.ts
+  s_7819f6de7b51ae::t_2a1a4bfd8c589b 11,16,20-49,81-90,134
+src/lib/tool-definition.ts
+  s_7819f6de7b51ae::t_6a011d282acf75 1-19
+src/tools/memory.ts
+  s_7819f6de7b51ae::t_4612ac4ec0fffe 13,15,183,185-187,191,195,197,426,428-429,433,435,575,580-582,586,590,594,596,660,666-668,670,704,706,708,743,748,750
+src/tools/session.ts
+  s_7819f6de7b51ae::t_3ebd39913dc298 11,16,206,212-214,218,224,226,231,264,270-273,277,279,284,424,428-429,435,441,447,451,453,459,530,537-538,541,545,551,557,561,566,573
+src/v2.ts
+  s_7819f6de7b51ae::t_79cdd3900a8942 9,41
+test/v1.test.ts
+  s_7819f6de7b51ae::t_46d1a8f8ce903a 1-18
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "3df5a80b9e1650147ef6f9d0fc9cf5a6a3b101b5",
+  "prompts": {},
+  "sessions": {
+    "s_7819f6de7b51ae": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a0d518-4469-79a0-9bcd-fb2976031ddb",
+        "model": "unknown"
+      },
+      "human_author": "Mathew Jacob <mathew@cloudflare.com>"
+    }
+  }
+}
