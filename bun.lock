@@ -94,6 +94,14 @@
 
     "@mathew-cf/rag-cli-darwin-arm64": ["@mathew-cf/rag-cli-darwin-arm64@2.0.0", "", { "os": "darwin", "cpu": "arm64" }, "sha512-ZBEkIFq5pPr3I3jmbkfvQMwKw3rlX/25o0T99g6s/xplOIwPc+7llSAPUuBtSb0UBA4xfhKkhidHFNf7g74CtA=="],
 
+    "@mathew-cf/rag-cli-darwin-x64": ["@mathew-cf/rag-cli-darwin-x64@2.0.0", "", { "os": "darwin", "cpu": "x64" }, "sha512-IaASedn/y7mRtIkXuKoD0ACTqZRoydjqccAMjecMC8hyjjJIo69R+PwDg1U4MR6lq/7TOV7djdEMW3UPDz4/bA=="],
+
+    "@mathew-cf/rag-cli-linux-arm64": ["@mathew-cf/rag-cli-linux-arm64@2.0.0", "", { "os": "linux", "cpu": "arm64" }, "sha512-/w4/L/M4LqLK9dEn5XrUeiNRTxdfwdrwD7m2q7OcepePllw4Cnm7UYjSYxOebyyNdhBLSriEHhrFtkq8gOTFag=="],
+
+    "@mathew-cf/rag-cli-linux-x64": ["@mathew-cf/rag-cli-linux-x64@2.0.0", "", { "os": "linux", "cpu": "x64" }, "sha512-cLpEeoL3K2XTOA7UEHX5AJCeoaB4psTEWNxeF+gvZtXagIr0LRIuVcmw5NLSoHiBPIt8CbhQE7xCzQujNXr1NA=="],
+
+    "@mathew-cf/rag-cli-win32-x64": ["@mathew-cf/rag-cli-win32-x64@2.0.0", "", { "os": "win32", "cpu": "x64" }, "sha512-YE8QDzO+0l5/fgrbtTaslD7eUy1Zbj0aSqe+AMAhANRLswOxT5weGYRA0iSuPk46qkDA8aIdZ1Kd1YmK5/I9FQ=="],
+
     "@msgpackr-extract/msgpackr-extract-darwin-arm64": ["@msgpackr-extract/msgpackr-extract-darwin-arm64@3.0.3", "", { "os": "darwin", "cpu": "arm64" }, "sha512-QZHtlVgbAdy2zAqNA9Gu1UpIuI8Xvsd1v8ic6B2pZmeFnFcMWiPLfWXh7TVw4eGEZ/C9TH281KwhVoeQUKbyjw=="],
 
     "@msgpackr-extract/msgpackr-extract-darwin-x64": ["@msgpackr-extract/msgpackr-extract-darwin-x64@3.0.3", "", { "os": "darwin", "cpu": "x64" }, "sha512-mdzd3AVzYKuUmiWOQ8GNhl64/IoFGol569zNRdkLReh6LRLHOXxU4U8eq0JwaD8iFHdVGqSy4IjFL4reoWCDFw=="],
