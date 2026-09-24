@@ -11,10 +11,8 @@
  *   - An absolute path also fails loudly if the dep is missing, which is
  *     easier to diagnose than a confusing "command not found".
  *
- * Semantic search is still optional: if resolution fails for any reason
- * (broken install, unusual layout, native binary missing for the host
- * platform), every public helper here degrades gracefully. Callers see
- * `null` from `resolveRagBinary()` and fall back to keyword-only search.
+ * If resolution fails (broken install or unsupported platform), public
+ * helpers return empty results and setup reports the missing binary.
  */
 
 import { createRequire } from "node:module";
@@ -41,6 +39,9 @@ export function resolveRagBinary(
   arch = process.arch,
   resolveFromShim?: (specifier: string) => string,
 ): string | null {
+  if (!resolveFromShim && platform === process.platform && arch === process.arch && process.env.OPENCODE_MEMORY_RAG_BINARY) {
+    return process.env.OPENCODE_MEMORY_RAG_BINARY;
+  }
   try {
     const shim = require.resolve("@mathew-cf/rag-cli/bin/rag.js");
     const resolve = resolveFromShim ?? createRequire(shim).resolve;
@@ -49,6 +50,44 @@ export function resolveRagBinary(
   } catch {
     return null;
   }
+}
+
+export interface KeywordFilesRequest {
+  root: string;
+  patterns: string[];
+  globs: string[];
+  fixedStrings?: boolean;
+}
+
+/** Live file search; exit 1 means no matches, while errors permit caller fallback. */
+export async function runRagKeywordFiles(
+  binary: string,
+  request: KeywordFilesRequest,
+  runner: RagCommandRunner = runRagCommand,
+): Promise<string[] | undefined> {
+  const args = [binary, "keyword", "--files-with-matches", "--ignore-case"];
+  if (request.fixedStrings) args.push("--fixed-strings");
+  for (const glob of request.globs) args.push("--glob", glob);
+  for (const pattern of request.patterns) args.push("-e", pattern);
+  args.push(request.root);
+  const result = await runner(args);
+  if (result.exitCode === 1) return [];
+  if (result.exitCode !== 0) return undefined;
+  return result.stdout.split("\n").filter(Boolean);
+}
+
+export async function ragKeywordFiles(request: KeywordFilesRequest): Promise<string[] | undefined> {
+  const binary = resolveRagBinary();
+  if (!binary) return undefined;
+  return runRagKeywordFiles(binary, request).catch(() => undefined);
+}
+
+export async function keywordAvailable(): Promise<boolean> {
+  const binary = resolveRagBinary();
+  if (!binary) return false;
+  return runRagCommand([binary, "keyword", "--help"])
+    .then((result) => result.exitCode === 0)
+    .catch(() => false);
 }
 
 /**
@@ -89,8 +128,7 @@ export function installGuidance(): string {
     "  2. On an unsupported platform, install rag-cli from source:",
     "       cargo install rag-cli",
     "",
-    "Without rag, keyword search (ripgrep) still works — you just won't",
-    "get semantic/similarity-based results.",
+    "Without rag, keyword and semantic search are unavailable.",
   ].join("\n");
 }
 

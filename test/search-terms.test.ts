@@ -69,7 +69,7 @@ describe("countTermMatches", () => {
 describe("scoreCandidate", () => {
   test("returns 0 when no signals are present", () => {
     const score = scoreCandidate({
-      rgMatch: false,
+      keywordMatch: false,
       termMatches: 0,
       totalTerms: 0,
       path: "empty.md",
@@ -78,16 +78,16 @@ describe("scoreCandidate", () => {
     expect(score).toBe(0);
   });
 
-  test("rgMatch alone produces a base score in [0.15, 0.50]", () => {
+  test("keywordMatch alone produces a base score in [0.15, 0.50]", () => {
     const low = scoreCandidate({
-      rgMatch: true,
+      keywordMatch: true,
       termMatches: 0,
       totalTerms: 3,
       path: "foo.md",
       terms: ["a", "b", "c"],
     });
     const high = scoreCandidate({
-      rgMatch: true,
+      keywordMatch: true,
       termMatches: 3,
       totalTerms: 3,
       path: "foo.md",
@@ -100,7 +100,7 @@ describe("scoreCandidate", () => {
 
   test("ragScore contributes 1.4x its raw value", () => {
     const score = scoreCandidate({
-      rgMatch: false,
+      keywordMatch: false,
       ragScore: 0.5,
       termMatches: 0,
       totalTerms: 0,
@@ -112,14 +112,14 @@ describe("scoreCandidate", () => {
 
   test("hybrid bonus fires only when both signals present", () => {
     const onlyRg = scoreCandidate({
-      rgMatch: true,
+      keywordMatch: true,
       termMatches: 1,
       totalTerms: 1,
       path: "foo.md",
       terms: ["alpha"],
     });
     const both = scoreCandidate({
-      rgMatch: true,
+      keywordMatch: true,
       ragScore: 0.5,
       termMatches: 1,
       totalTerms: 1,
@@ -132,14 +132,14 @@ describe("scoreCandidate", () => {
 
   test("tag match contributes proportionally to term coverage", () => {
     const noTag = scoreCandidate({
-      rgMatch: false,
+      keywordMatch: false,
       termMatches: 0,
       totalTerms: 2,
       path: "foo.md",
       terms: ["alpha", "beta"],
     });
     const oneTag = scoreCandidate({
-      rgMatch: false,
+      keywordMatch: false,
       termMatches: 0,
       totalTerms: 2,
       path: "foo.md",
@@ -147,7 +147,7 @@ describe("scoreCandidate", () => {
       tags: ["alpha-release"],
     });
     const bothTags = scoreCandidate({
-      rgMatch: false,
+      keywordMatch: false,
       termMatches: 0,
       totalTerms: 2,
       path: "foo.md",
@@ -160,14 +160,14 @@ describe("scoreCandidate", () => {
 
   test("path match contributes proportionally", () => {
     const noPath = scoreCandidate({
-      rgMatch: false,
+      keywordMatch: false,
       termMatches: 0,
       totalTerms: 1,
       path: "misc.md",
       terms: ["alpha"],
     });
     const withPath = scoreCandidate({
-      rgMatch: false,
+      keywordMatch: false,
       termMatches: 0,
       totalTerms: 1,
       path: "technical/alpha-release.md",
@@ -178,14 +178,14 @@ describe("scoreCandidate", () => {
 
   test("importance high adds 0.15, low subtracts 0.10", () => {
     const base = scoreCandidate({
-      rgMatch: false,
+      keywordMatch: false,
       termMatches: 0,
       totalTerms: 0,
       path: "foo.md",
       terms: [],
     });
     const high = scoreCandidate({
-      rgMatch: false,
+      keywordMatch: false,
       termMatches: 0,
       totalTerms: 0,
       path: "foo.md",
@@ -193,7 +193,7 @@ describe("scoreCandidate", () => {
       importance: "high",
     });
     const low = scoreCandidate({
-      rgMatch: false,
+      keywordMatch: false,
       termMatches: 0,
       totalTerms: 0,
       path: "foo.md",
@@ -207,7 +207,7 @@ describe("scoreCandidate", () => {
   test("access count bonuses cross thresholds at 2 and 5", () => {
     const mk = (count?: number) =>
       scoreCandidate({
-        rgMatch: false,
+        keywordMatch: false,
         termMatches: 0,
         totalTerms: 0,
         path: "foo.md",

@@ -25,13 +25,13 @@
  *     Idempotent — safe to run multiple times.
  *
  *   status
- *     Report which search backends (ripgrep, rag-cli) are resolvable.
+ *     Report whether rag-cli and its keyword command are available.
  *     Same output as the `memory_setup` tool.
  *
  *   help
  *     Print usage.
  *
- * The CLI is intentionally tiny: the heavy lifting (rag download, ripgrep
+ * The CLI is intentionally tiny: the heavy lifting (rag download and binary
  * resolution) lives in src/lib/ and is shared with the plugin tools so
  * a single bug fix benefits both surfaces.
  */
@@ -43,8 +43,7 @@ import { dirname, resolve as resolvePath } from "node:path";
 import { fileURLToPath } from "node:url";
 import { CATEGORIES, DEFAULT_MEMORY_SUBDIR } from "./constants";
 import { resolveMemoryDir } from "./lib/paths";
-import { downloadModel, resolveRagBinary } from "./lib/rag";
-import { resolveRgBinary } from "./lib/ripgrep";
+import { downloadModel, keywordAvailable, resolveRagBinary } from "./lib/rag";
 import { runSetup } from "./tools/memory";
 
 interface InitOptions {
@@ -304,8 +303,8 @@ export function usage(): string {
     "      Pi). Idempotent.",
     "",
     "  status",
-    "      Report which search backends (ripgrep, rag-cli) are",
-    "      resolvable. Same output as the memory_setup tool.",
+    "      Report whether rag-cli and its keyword command are",
+    "      available. Same output as the memory_setup tool.",
     "",
     "  help",
     "      Show this message.",
@@ -381,9 +380,9 @@ export async function dispatch(argv: string[], io: DispatchIO = {}): Promise<num
     }
     case "status": {
       out((await runSetup()) + "\n");
-      // Status returns nonzero when either backend is unresolvable, so
+      // Status returns nonzero when the binary lacks keyword search, so
       // `bunx @mathew-cf/opencode-memory status` can be used in CI.
-      const ok = resolveRagBinary() !== null && resolveRgBinary() !== null;
+      const ok = resolveRagBinary() !== null && await keywordAvailable();
       return ok ? 0 : 1;
     }
     case undefined:

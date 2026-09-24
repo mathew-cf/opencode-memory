@@ -302,9 +302,8 @@ describe("dispatch", () => {
     });
   });
 
-  test("status returns 0 when both backends resolve", async () => {
-    // Both backends are deps in this repo, so this assertion runs in
-    // tests; in environments where one is missing dispatch returns 1.
+  test("status reflects rag keyword availability", async () => {
+    // A previously published rag binary may lack the keyword command.
     const code = await dispatch(["status"], silent);
     expect([0, 1]).toContain(code);
   });

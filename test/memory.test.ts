@@ -10,7 +10,7 @@
 import { afterAll, describe, expect, test } from "bun:test";
 import { chmod, exists, stat, symlink, unlink } from "node:fs/promises";
 import {
-  buildRgArgs,
+  memoryKeywordRequest,
   parseRagHits,
   runAccess,
   runList,
@@ -23,19 +23,15 @@ import {
 } from "../src/tools/memory";
 import { withMemoryDir, writeMemoryFile } from "./helpers";
 
-describe("buildRgArgs", () => {
-  test("produces -e flags for each term in order", () => {
-    const args = buildRgArgs(["alpha", "beta"]);
-    expect(args).toContain("-e");
-    expect(args[args.length - 4]).toBe("-e");
-    expect(args[args.length - 3]).toBe("alpha");
-    expect(args[args.length - 2]).toBe("-e");
-    expect(args[args.length - 1]).toBe("beta");
+describe("memoryKeywordRequest", () => {
+  test("keeps OR terms and the selected root", () => {
+    const request = memoryKeywordRequest(["alpha", "beta"], "/memory");
+    expect(request.patterns).toEqual(["alpha", "beta"]);
+    expect(request.root).toBe("/memory");
   });
 
   test("always excludes .git, .rag, and INDEX.md", () => {
-    const args = buildRgArgs(["x"]);
-    const joined = args.join(" ");
+    const joined = memoryKeywordRequest(["x"], "/memory").globs.join(" ");
     expect(joined).toContain("!.git");
     expect(joined).toContain("!.rag");
     expect(joined).toContain("!**/INDEX.md");
@@ -88,7 +84,7 @@ describe("toRelPath", () => {
     );
   });
 
-  test("normalizes backslashes in rg output", () => {
+  test("normalizes backslashes in keyword output", () => {
     expect(toRelPath("/tmp/mem", "\\tmp\\mem\\technical\\foo.md")).toBe(
       "/tmp/mem/technical/foo.md".replace("/tmp/mem/", ""),
     );
@@ -515,26 +511,18 @@ describe("runSave", () => {
 });
 
 describe("runSetup", () => {
-  test("reports status lines for both ripgrep and the rag binary", async () => {
+  test("reports status lines for the rag binary and its keyword command", async () => {
     const out = await runSetup();
-    // We don't assume a particular install state — tests are run with
-    // both deps linked, but the output shape should be consistent even
-    // if one resolves and the other doesn't.
-    expect(out).toContain("ripgrep (keyword search):");
-    expect(out).toContain("rag binary (semantic search):");
+    expect(out).toContain("rag binary:");
+    expect(out).toContain("rag keyword:");
   });
 
-  test("reports 'All set' when both resolve, or guidance when one is missing", async () => {
+  test("reports readiness or guidance", async () => {
     const out = await runSetup();
-    const bothResolved = !out.includes("NOT resolvable");
-    if (bothResolved) {
+    if (out.includes("rag keyword: available")) {
       expect(out).toContain("All set");
     } else {
-      // At least one guidance message should appear.
-      const hasGuidance =
-        out.includes("Keyword search is unavailable") ||
-        out.includes("Semantic search is unavailable");
-      expect(hasGuidance).toBe(true);
+      expect(out.includes("update @mathew-cf/rag-cli") || out.includes("Semantic search is unavailable")).toBe(true);
     }
   });
 });

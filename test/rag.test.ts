@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { ragProcessEnv, resolveRagBinary, runRagSearch, type RagCommandResult } from "../src/lib/rag";
+import { ragProcessEnv, resolveRagBinary, runRagKeywordFiles, runRagSearch, type RagCommandResult } from "../src/lib/rag";
 
 describe("rag executable", () => {
   test("resolves the Windows native executable instead of the JavaScript shim", () => {
@@ -25,6 +25,33 @@ describe("rag executable", () => {
       PATH: "bin",
     });
     expect(ragProcessEnv({ HOME: "/chosen", USERPROFILE: "C:\\Users\\mat" }).HOME).toBe("/chosen");
+  });
+});
+
+describe("runRagKeywordFiles", () => {
+  test("passes live glob and OR patterns to rag keyword", async () => {
+    let command: string[] = [];
+    const files = await runRagKeywordFiles(
+      "/bin/rag",
+      { root: "/memory", patterns: ["foo", "bar"], globs: ["*.md", "!INDEX.md"] },
+      async (argv) => {
+        command = argv;
+        return { exitCode: 0, stdout: "/memory/a.md\n/memory/b.md\n", stderr: "" };
+      },
+    );
+    expect(files).toEqual(["/memory/a.md", "/memory/b.md"]);
+    expect(command).toEqual([
+      "/bin/rag", "keyword", "--files-with-matches", "--ignore-case",
+      "--glob", "*.md", "--glob", "!INDEX.md", "-e", "foo", "-e", "bar", "/memory",
+    ]);
+  });
+
+  test("distinguishes no matches from command failure", async () => {
+    const request = { root: "/sessions", patterns: ["a.b"], globs: ["*.jsonl"], fixedStrings: true };
+    const noMatches = await runRagKeywordFiles("rag", request, async () => ({ exitCode: 1, stdout: "", stderr: "" }));
+    const failed = await runRagKeywordFiles("rag", request, async () => ({ exitCode: 2, stdout: "", stderr: "failed" }));
+    expect(noMatches).toEqual([]);
+    expect(failed).toBeUndefined();
   });
 });
 

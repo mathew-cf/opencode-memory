@@ -90,7 +90,7 @@ The lib layer never reads config statically. Both `resolveMemoryDir()` and `reso
 
 ### Graceful degradation around `rag`
 
-The `rag` CLI is optional. `ensureRag()` silently tries a `cargo install` fallback if cargo is present; if not, everything downgrades to keyword-only search. No tool path ever hard-fails on missing `rag`.
+The package supplies the native `rag` CLI for both live keyword search and semantic search. If the binary is unavailable, search returns an empty result rather than throwing to the tool caller; `memory_setup` reports the installation problem. Pi session search falls back to scanning its session files when keyword prefiltering fails.
 
 ## Coding Conventions
 
@@ -106,7 +106,7 @@ The `rag` CLI is optional. `ensureRag()` silently tries a `cargo install` fallba
 
 - `test/helpers.ts` provides `withMemoryDir(cb)` which creates a fresh temp dir, points `$OPENCODE_MEMORY_DIR` at it, runs the callback, then cleans up and restores the env.
 - Pure-logic tests (`frontmatter.test.ts`, `search-terms.test.ts`, `paths.test.ts`, `guard.test.ts`, `config.test.ts`) take <100ms in aggregate — they don't hit the filesystem at all.
-- `memory.test.ts` and `session.test.ts` are integration tests. `session.test.ts` builds a temp SQLite DB with the minimum schema we actually touch; `memory.test.ts` runs rg shell-outs against real files so bugs in the rg arg assembly get caught.
+- `memory.test.ts` and `session.test.ts` are integration tests. `session.test.ts` builds a temp SQLite DB with the minimum schema we actually touch; `memory.test.ts` searches real files through the native rag keyword command.
 - Ranking assertions are **relative, not absolute** — e.g. `expect(aIdx).toBeLessThan(bIdx)`. Pinning exact scores makes the ranker impossible to tune.
 
 ## Adding a New Tool

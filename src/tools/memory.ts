@@ -22,8 +22,7 @@ import {
   resolveContainedPath,
   resolveMemoryDir,
 } from "../lib/paths";
-import { installGuidance, ragAvailable, ragSearch, resolveRagBinary, spawnRagIndex } from "../lib/rag";
-import { resolveRgBinary, rgInstallGuidance } from "../lib/ripgrep";
+import { installGuidance, ragAvailable, ragKeywordFiles, ragSearch, resolveRagBinary, spawnRagIndex, keywordAvailable } from "../lib/rag";
 import { countTermMatches, parseSearchTerms, scoreCandidate } from "../lib/search-terms";
 
 // --- Internal helpers ---------------------------------------------------
@@ -55,15 +54,14 @@ function accessCounts(memoryDir: string): Map<string, number> {
 }
 
 /**
- * Build a ripgrep argument list for OR-matching multiple terms.
- * Kept as a pure function so tests can verify the exact args shape.
+ * Describe the live Markdown search shared by normal and category fallback.
  */
-export function buildRgArgs(terms: string[]): string[] {
-  const args = ["-il", "--glob", "*.md", "--glob", "!.git", "--glob", "!.rag", "--glob", "!**/INDEX.md"];
-  for (const term of terms) {
-    args.push("-e", term);
-  }
-  return args;
+export function memoryKeywordRequest(terms: string[], root: string) {
+  return {
+    root,
+    patterns: terms,
+    globs: ["*.md", "!.git", "!.rag", "!**/INDEX.md"],
+  };
 }
 
 /**
@@ -112,7 +110,7 @@ export function memorySearchDescription(memoryDir?: string): string {
   const memoryRoot = configuredMemoryDirLabel(memoryDir);
   const memoryPath = configuredMemoryPathLabel("{path}", memoryDir);
   return (
-    `Search memories in ${memoryRoot} using both keyword (rg) and semantic (rag) search. ` +
+    `Search memories in ${memoryRoot} using both live keyword and semantic search. ` +
     "Results are concise pointers (path, importance, summary, and short evidence). " +
     "Use memory_read on a result to retrieve only the relevant content.\n\n" +
     "Multi-term queries match files containing ANY search term (OR logic); files matching more terms rank higher. " +
@@ -216,24 +214,22 @@ export async function runSearch(input: {
   const indexDir = ragIndexDir(memoryDir);
   const searchDir = category ? posix.join(memoryDir, category) : memoryDir;
   const terms = parseSearchTerms(query);
-  const rgTerms = terms.length > 0 ? terms : [query];
+  const keywordTerms = terms.length > 0 ? terms : [query];
 
   const hasRag = ragAvailable();
-  const rgBin = resolveRgBinary();
 
-  const [rgResult, ragResultText] = await Promise.all([
-    rgBin ? Bun.$`${rgBin} ${buildRgArgs(rgTerms)} ${searchDir}`.text().catch(() => "") : Promise.resolve(""),
+  const [keywordPaths, ragResultText] = await Promise.all([
+    ragKeywordFiles(memoryKeywordRequest(keywordTerms, searchDir)),
     hasRag ? ragSearch({ query, indexDir, topK: 15 }) : Promise.resolve(""),
   ]);
 
-  const resultMap = new Map<string, { rgMatch: boolean; ragScore?: number; ragText?: string }>();
+  const resultMap = new Map<string, { keywordMatch: boolean; ragScore?: number; ragText?: string }>();
 
-  const rgText = rgResult.trim();
-  if (rgText) {
-    for (const line of rgText.split("\n")) {
+  if (keywordPaths) {
+    for (const line of keywordPaths) {
       const rel = toRelPath(memoryDir, line);
       if (rel.endsWith(".md") && !rel.startsWith(".")) {
-        resultMap.set(rel, { rgMatch: true });
+        resultMap.set(rel, { keywordMatch: true });
       }
     }
   }
@@ -242,7 +238,7 @@ export async function runSearch(input: {
   for (const hit of ragHits) {
     if (hit.source.endsWith("INDEX.md")) continue;
     if (category && !hit.source.startsWith(category + "/")) continue;
-    const existing = resultMap.get(hit.source) || { rgMatch: false };
+    const existing = resultMap.get(hit.source) || { keywordMatch: false };
     if (!existing.ragScore || hit.score > existing.ragScore) {
       existing.ragScore = hit.score;
       existing.ragText = hit.text;
@@ -253,18 +249,18 @@ export async function runSearch(input: {
   let crossCategoryFallback = false;
   if (resultMap.size === 0 && category) {
     crossCategoryFallback = true;
-    const globalRgText = rgBin ? await Bun.$`${rgBin} ${buildRgArgs(rgTerms)} ${memoryDir}`.text().catch(() => "") : "";
-    if (globalRgText.trim()) {
-      for (const line of globalRgText.trim().split("\n")) {
+    const globalPaths = await ragKeywordFiles(memoryKeywordRequest(keywordTerms, memoryDir));
+    if (globalPaths) {
+      for (const line of globalPaths) {
         const rel = toRelPath(memoryDir, line);
         if (rel.endsWith(".md") && !rel.startsWith(".")) {
-          resultMap.set(rel, { rgMatch: true });
+          resultMap.set(rel, { keywordMatch: true });
         }
       }
     }
     for (const hit of ragHits) {
       if (hit.source.endsWith("INDEX.md")) continue;
-      const existing = resultMap.get(hit.source) || { rgMatch: false };
+      const existing = resultMap.get(hit.source) || { keywordMatch: false };
       if (!existing.ragScore || hit.score > existing.ragScore) {
         existing.ragScore = hit.score;
         existing.ragText = hit.text;
@@ -306,7 +302,7 @@ export async function runSearch(input: {
   const results: Array<{
     path: string;
     meta: FrontMatter;
-    rgMatch: boolean;
+    keywordMatch: boolean;
     ragScore?: number;
     ragText?: string;
     termMatches: number;
@@ -318,10 +314,10 @@ export async function runSearch(input: {
     try {
       const content = await Bun.file(posix.join(memoryDir, path)).text();
       const { meta } = parseFrontmatter(content);
-      const termMatches = terms.length > 0 ? countTermMatches(content, terms) : info.rgMatch ? 1 : 0;
+      const termMatches = terms.length > 0 ? countTermMatches(content, terms) : info.keywordMatch ? 1 : 0;
 
       const score = scoreCandidate({
-        rgMatch: info.rgMatch,
+        keywordMatch: info.keywordMatch,
         ragScore: info.ragScore,
         termMatches,
         totalTerms: terms.length,
@@ -356,7 +352,7 @@ export async function runSearch(input: {
 
   for (const [i, r] of shown.entries()) {
     const isDirectHit =
-      r.rgMatch && r.ragScore !== undefined && r.ragScore > 0.4 && r.termMatches === terms.length;
+      r.keywordMatch && r.ragScore !== undefined && r.ragScore > 0.4 && r.termMatches === terms.length;
     const hitLabel = isDirectHit ? " ★ DIRECT HIT" : "";
     const summary = r.meta.summary ? ` — ${r.meta.summary}` : "";
 
@@ -369,7 +365,7 @@ export async function runSearch(input: {
     if (r.meta.summary) lines.push(`   ${r.meta.summary}`);
 
     const sources: string[] = [];
-    if (r.rgMatch) {
+    if (r.keywordMatch) {
       const termInfo = terms.length > 1 ? ` (${r.termMatches}/${terms.length} terms)` : "";
       sources.push(`keyword${termInfo}`);
     }
@@ -380,7 +376,7 @@ export async function runSearch(input: {
     if (detail === "debug") {
       const semantic = r.ragScore === undefined ? "n/a" : r.ragScore.toFixed(3);
       lines.push(
-        `   Diagnostics: keyword=${r.rgMatch}; term_hits=${r.termMatches}/${terms.length}; ` +
+        `   Diagnostics: keyword=${r.keywordMatch}; term_hits=${r.termMatches}/${terms.length}; ` +
           `semantic=${semantic}; combined_score=${r.score.toFixed(3)}`,
       );
       if (r.meta.tags?.length) lines.push(`   Tags: ${r.meta.tags.join(", ")}`);
@@ -753,25 +749,23 @@ export const setup = defineTool({
 
 export async function runSetup(): Promise<string> {
   const ragBinary = resolveRagBinary();
-  const rgBin = resolveRgBinary();
+  const hasKeyword = await keywordAvailable();
   const lines: string[] = [];
-  lines.push(`ripgrep (keyword search): ${rgBin ?? "NOT resolvable"}`);
-  lines.push(`rag binary (semantic search): ${ragBinary ?? "NOT resolvable"}`);
+  lines.push(`rag binary: ${ragBinary ?? "NOT resolvable"}`);
+  lines.push(`rag keyword: ${hasKeyword ? "available" : "unavailable"}`);
   lines.push("");
 
-  if (ragBinary && rgBin) {
+  if (ragBinary && hasKeyword) {
     lines.push(
-      "All set — both search backends are available. Run `rag download` " +
+      "All set — keyword and semantic search are available. Run `rag download` " +
         "once to pre-cache the embedding model if you haven't already " +
         "(subsequent semantic searches are fast).",
     );
   } else {
-    if (!rgBin) {
-      lines.push(rgInstallGuidance());
-      lines.push("");
-    }
     if (!ragBinary) {
       lines.push(installGuidance());
+    } else if (!hasKeyword) {
+      lines.push("This rag-cli version lacks `rag keyword`; update @mathew-cf/rag-cli.");
     }
   }
   return lines.join("\n");

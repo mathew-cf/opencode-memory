@@ -39,11 +39,11 @@ export function resolveHome(env: NodeJS.ProcessEnv = process.env): string {
 /**
  * Normalize a filesystem path to use forward slashes.
  *
- * On Windows, ripgrep emits paths with backslashes even when invoked with
+ * On Windows, the rag keyword command emits paths with backslashes even when invoked with
  * forward-slash arguments. When our code strips a forward-slash
- * OPENCODE_MEMORY_DIR prefix from a backslash-separated rg output line,
+ * OPENCODE_MEMORY_DIR prefix from a backslash-separated keyword output line,
  * the replace silently fails and the prefix is left in place — which
- * breaks every downstream file read. Normalizing rg output through this
+ * breaks every downstream file read. Normalizing keyword output through this
  * helper restores the invariant that paths handled inside the tool
  * always use /.
  *

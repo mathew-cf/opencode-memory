@@ -30,7 +30,7 @@ export type Category = (typeof CATEGORIES)[number];
 export const DEFAULT_MEMORY_SUBDIR = "opencode-memory";
 
 /**
- * Name of the ripgrep-invisible subdirectory used to store the semantic search
+ * Name of the keyword-search-invisible subdirectory used to store the semantic search
  * index (if `rag` is installed). Bundled inside the memory root so that the
  * index travels with whatever sync mechanism backs the knowledge base.
  */

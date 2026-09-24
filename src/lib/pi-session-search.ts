@@ -1,7 +1,7 @@
 import { readdir, readFile, stat } from "node:fs/promises";
 import { homedir } from "node:os";
 import { basename, join } from "node:path";
-import { resolveRgBinary } from "./ripgrep";
+import { ragKeywordFiles } from "./rag";
 import type { SessionSearchRequest } from "./session-fanout";
 
 const MAX_CANDIDATES = 250;
@@ -34,16 +34,7 @@ async function sessionFiles(root: string, depth = 0): Promise<Array<{ path: stri
 }
 
 async function candidates(root: string, terms: string[]): Promise<string[] | undefined> {
-  const rg = resolveRgBinary();
-  if (!rg) return undefined;
-  const args = ["--files-with-matches", "--no-messages", "-i", "-F", "--glob", "*.jsonl"];
-  for (const term of terms) args.push("-e", term);
-  args.push(root);
-  const child = Bun.spawn([rg, ...args], { stdout: "pipe", stderr: "ignore" });
-  const [exitCode, stdout] = await Promise.all([child.exited, new Response(child.stdout).text()]);
-  if (exitCode === 1) return [];
-  if (exitCode !== 0) return undefined;
-  return stdout.split("\n").filter(Boolean);
+  return ragKeywordFiles({ root, patterns: terms, globs: ["*.jsonl"], fixedStrings: true });
 }
 
 function messageText(value: unknown): { role: "user" | "assistant"; text: string } | undefined {

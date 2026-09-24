@@ -3,7 +3,7 @@
  *
  * All the logic in this file is pure — no filesystem, no shell, no
  * timestamps. That lets tests pin down ranking behaviour deterministically
- * without setting up a temp directory or spawning `rg`.
+ * without setting up a temp directory or spawning `rag`.
  */
 
 import { STOP_WORDS } from "../constants";
@@ -52,11 +52,11 @@ export function countTermMatches(text: string, terms: string[]): number {
  * Structured inputs for the memory ranker. Kept as a record of primitives
  * so callers can fill in whatever subset of signals they have — e.g. tests
  * can exercise just the importance weighting without constructing a full
- * ripgrep/rag result.
+ * keyword/semantic result.
  */
 export interface ScoreInputs {
-  /** True if ripgrep found a keyword match in this file. */
-  rgMatch: boolean;
+  /** True if live keyword search found a match in this file. */
+  keywordMatch: boolean;
   /** Cosine similarity from the semantic index, if available. */
   ragScore?: number;
   /** Per-file count of how many search terms appeared in the body. */
@@ -78,8 +78,8 @@ export interface ScoreInputs {
 /**
  * Deterministic scorer for a single candidate memory file. The weights were
  * tuned against a real corpus, but the key insight is that they're all
- * bounded — no single signal can dominate. `rg` gives coarse recall; `rag`
- * gives semantic discrimination; the metadata bonuses reward curation.
+ * bounded — no single signal can dominate. Keyword search gives coarse recall;
+ * semantic search distinguishes related meanings, and metadata rewards curation.
  *
  * Exported so tests can verify the exact ranking under mixed signals
  * without going through the full `memory_search` tool.
@@ -89,7 +89,7 @@ export function scoreCandidate(input: ScoreInputs): number {
 
   // Keyword match — lowered base so rag can discriminate between candidates
   // that all matched some keyword.
-  if (input.rgMatch) {
+  if (input.keywordMatch) {
     const termCoverage =
       input.totalTerms > 0 ? input.termMatches / input.totalTerms : 1;
     score += 0.15 + 0.35 * termCoverage; // 0.15-0.50
@@ -100,7 +100,7 @@ export function scoreCandidate(input: ScoreInputs): number {
   if (input.ragScore) score += input.ragScore * 1.4;
 
   // Hybrid synergy — matching both signals is a strong confidence bump.
-  if (input.rgMatch && input.ragScore) score += 0.1;
+  if (input.keywordMatch && input.ragScore) score += 0.1;
 
   // Tag match — curated metadata is a strong signal that the author
   // considered this file relevant to this topic.

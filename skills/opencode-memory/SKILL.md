@@ -282,14 +282,14 @@ Fix: document the target architecture as if it's already the design. If you must
 
 ## Installation — Search Backends
 
-Both search backends ship as npm dependencies with prebuilt binaries:
+Keyword and semantic search use the same npm dependency and native binary:
 
-| Backend                | Package                 | Provides the `<bin>` |
-| ---------------------- | ----------------------- | -------------------- |
-| **Keyword (ripgrep)**  | `@vscode/ripgrep`       | `rg`                 |
-| **Semantic (rag-cli)** | `@mathew-cf/rag-cli`    | `rag`                |
+| Search mode | Command       | Package              |
+| ----------- | ------------- | -------------------- |
+| Keyword     | `rag keyword` | `@mathew-cf/rag-cli` |
+| Semantic    | `rag search`  | `@mathew-cf/rag-cli` |
 
-No manual install is needed — `npm install` (or whatever installs this plugin) pulls in both and resolves them via `require.resolve` at runtime. Nothing depends on `$PATH`.
+No manual install is needed — `npm install` (or whatever installs this plugin) pulls in the package and resolves its native binary at runtime. Nothing depends on `$PATH`.
 
 ### One-shot bootstrap
 
