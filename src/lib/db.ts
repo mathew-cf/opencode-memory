@@ -23,6 +23,15 @@ export function resolveDbPath(env: NodeJS.ProcessEnv = process.env): string {
   return `${resolveHome(env)}/.local/share/opencode/opencode.db`;
 }
 
+/** OpenCode v2 honors XDG_DATA_HOME; v1 used the home-relative path. */
+export function resolveDbPaths(env: NodeJS.ProcessEnv = process.env): string[] {
+  if (env.OPENCODE_DB) return [env.OPENCODE_DB];
+  const v2 = env.XDG_DATA_HOME
+    ? `${env.XDG_DATA_HOME}/opencode/opencode.db`
+    : resolveDbPath(env);
+  return [...new Set([v2, resolveDbPath(env)])];
+}
+
 /**
  * Escape a value for use in a SQLite single-quoted string literal.
  * Exported for tests — the exact quoting rules matter for ensuring we

@@ -10,7 +10,7 @@
 import { tool, type ToolDefinition } from "@opencode-ai/plugin";
 import { existsSync } from "node:fs";
 import { searchCodexSessions } from "../lib/codex-session-search";
-import { querySqlite, resolveDbPath, sqlStr } from "../lib/db";
+import { querySqlite, resolveDbPaths, sqlStr } from "../lib/db";
 import { searchPiSessions } from "../lib/pi-session-search";
 import { parseSearchTerms } from "../lib/search-terms";
 import {
@@ -94,6 +94,7 @@ interface SessionSearchDbRow extends Omit<SessionSearchRow, "snippet"> {
   title_match: number;
   content_match: number;
   part_term_hits: number | null;
+  time_updated: number;
 }
 
 export interface SessionListRow {
@@ -102,6 +103,65 @@ export interface SessionListRow {
   directory: string;
   created: string;
   updated: string;
+  time_updated: number;
+}
+
+type Schema = "v1" | "v2";
+type Source = { db: string; schema: Schema };
+
+async function sessionSources(): Promise<Source[]> {
+  const sources: Source[] = [];
+  for (const db of resolveDbPaths()) {
+    if (!existsSync(db)) continue;
+    const tables = await querySqlite<{ name: string }>(
+      db,
+      "SELECT name FROM sqlite_master WHERE type='table' AND name IN ('session','message','part','session_v2','session_message');",
+    );
+    const names = new Set(tables.map((row) => row.name));
+    if (names.has("session_v2") && names.has("session_message")) sources.push({ db, schema: "v2" });
+    if (names.has("session") && names.has("message") && names.has("part")) sources.push({ db, schema: "v1" });
+  }
+  return sources;
+}
+
+async function migratedSessionIds(sources: Source[]): Promise<Set<string>> {
+  const ids = await Promise.all(sources.filter((source) => source.schema === "v2")
+    .map((source) => querySqlite<{ id: string }>(source.db, "SELECT id FROM session_v2;")));
+  return new Set(ids.flat().map((row) => row.id));
+}
+
+/** V2 stores one user text or multiple assistant content items per message. */
+function rankedText(schema: Schema): string {
+  if (schema === "v1") return `
+    SELECT p.id AS part_id, p.session_id, json_extract(p.data,'$.text') AS text,
+           json_extract(m.data,'$.role') AS role,
+           ROW_NUMBER() OVER (PARTITION BY p.session_id ORDER BY p.time_created, p.id) - 1 AS pos
+    FROM part p JOIN message m ON m.id = p.message_id
+    WHERE json_extract(p.data,'$.type') = 'text'`;
+  return `
+    SELECT part_id, session_id, text, role,
+           ROW_NUMBER() OVER (PARTITION BY session_id ORDER BY seq, item_index, part_id) - 1 AS pos
+    FROM (
+      SELECT m.id || ':user' AS part_id, m.session_id, json_extract(m.data,'$.text') AS text,
+             'user' AS role, m.seq, -1 AS item_index
+      FROM session_message m WHERE m.type = 'user' AND json_type(m.data,'$.text') = 'text'
+      UNION ALL
+      SELECT m.id || ':' || item.key AS part_id, m.session_id,
+             json_extract(item.value,'$.text') AS text, 'assistant' AS role,
+             m.seq, CAST(item.key AS INTEGER) AS item_index
+      FROM session_message m, json_each(m.data,'$.content') item
+      WHERE m.type = 'assistant' AND json_extract(item.value,'$.type') = 'text'
+        AND json_type(item.value,'$.text') = 'text'
+    )`;
+}
+
+function preferV2<T extends { id: string }>(rows: Array<T & { schema: Schema }>): T[] {
+  const byId = new Map<string, T & { schema: Schema }>();
+  for (const row of rows) {
+    const previous = byId.get(row.id);
+    if (!previous || (previous.schema === "v1" && row.schema === "v2")) byId.set(row.id, row);
+  }
+  return [...byId.values()];
 }
 
 const MAX_SESSION_RESULTS = 100;
@@ -188,7 +248,7 @@ export async function runAllSessionSearch(
     {
       source: "OpenCode",
       search: async (providerInput) => {
-        if (!existsSync(resolveDbPath())) {
+        if ((await sessionSources()).length === 0) {
           throw new Error("OpenCode is not installed or has no session database");
         }
         return runSessionSearch(providerInput);
@@ -238,7 +298,7 @@ export async function runSessionSearch(input: {
 
   const patterns = terms.map((term) => `%${escapeLikeTerm(term)}%`);
   const dirFilter = directory ? `%${directory}%` : "%";
-  const db = resolveDbPath();
+  const sources = await sessionSources();
 
   // Self-exclusion is optional: tests run without a session context so the
   // "skip my own session" clause collapses to a no-op.
@@ -252,16 +312,9 @@ export async function runSessionSearch(input: {
   // scores each part, then `representatives` deterministically picks the part
   // matching the most distinct terms (earliest part wins ties). The outer
   // score counts each term once across the title and every message.
-  const searchSql = `
+  const searchSql = (schema: Schema, sourceLimit: number) => `
     WITH ranked AS (
-      SELECT p.id AS part_id,
-             p.session_id,
-             json_extract(p.data,'$.text') AS text,
-             ROW_NUMBER() OVER (
-               PARTITION BY p.session_id ORDER BY p.time_created ASC, p.id ASC
-             ) - 1 AS pos
-      FROM part p
-      WHERE json_extract(p.data,'$.type') = 'text'
+      ${rankedText(schema)}
     ),
     matching AS (
       SELECT r.*, ${termHits("r.text", patterns)} AS part_term_hits
@@ -276,7 +329,7 @@ export async function runSessionSearch(input: {
              ) AS representative_rank
       FROM matching m
     )
-    SELECT s.id, s.title, s.directory,
+    SELECT s.id, s.title, s.directory, s.time_updated,
            datetime(s.time_updated/1000,'unixepoch','localtime') AS updated,
            representative.text AS match_text,
            representative.pos AS match_offset,
@@ -284,7 +337,7 @@ export async function runSessionSearch(input: {
            ${sessionTermHits("s.title", "s.id", "ranked", patterns)} AS term_hits,
            CASE WHEN ${likeOr("s.title", patterns)} THEN 1 ELSE 0 END AS title_match,
            CASE WHEN representative.session_id IS NULL THEN 0 ELSE 1 END AS content_match
-    FROM session s
+    FROM ${schema === "v2" ? "session_v2" : "session"} s
     LEFT JOIN representatives representative
       ON representative.session_id = s.id AND representative.representative_rank = 1
     WHERE (${likeOr("s.title", patterns)} OR EXISTS (
@@ -297,9 +350,17 @@ export async function runSessionSearch(input: {
              COALESCE(representative.part_term_hits, 0) DESC,
              s.time_updated DESC,
              s.id ASC
-    LIMIT ${safeLimit};`;
+    LIMIT ${sourceLimit};`;
 
-  const rows = await querySqlite<SessionSearchDbRow>(db, searchSql);
+  const migratedIds = await migratedSessionIds(sources);
+  const rows = preferV2((await Promise.all(sources.map(async ({ db, schema }) =>
+    (await querySqlite<SessionSearchDbRow>(db, searchSql(schema, safeLimit + (schema === "v1" ? migratedIds.size : 0))))
+      .map((row) => ({ ...row, schema })),
+  ))).flat().filter((row) => row.schema === "v2" || !migratedIds.has(row.id))).sort((a, b) =>
+    b.term_hits - a.term_hits ||
+    (b.part_term_hits ?? 0) - (a.part_term_hits ?? 0) ||
+    b.time_updated - a.time_updated || a.id.localeCompare(b.id),
+  ).slice(0, safeLimit);
   const results: Array<SessionSearchRow & { match: string }> = rows.map((row) => ({
     id: row.id,
     title: row.title,
@@ -408,7 +469,7 @@ export async function runSessionList(input: {
   const { from, to, directory, limit = 20, currentSessionId } = input;
   const safeLimit = normalizeSessionInteger(limit, 20, 1, MAX_SESSION_RESULTS);
   const dirFilter = directory ? `%${directory}%` : "%";
-  const db = resolveDbPath();
+  const sources = await sessionSources();
 
   const fromClause = from
     ? `AND s.time_updated >= strftime('%s', ${sqlStr(from)}) * 1000`
@@ -420,20 +481,25 @@ export async function runSessionList(input: {
     ? `AND s.id != ${sqlStr(currentSessionId)}`
     : "";
 
-  const sql = `
-    SELECT s.id, s.title, s.directory,
+  const sql = (schema: Schema, sourceLimit: number) => `
+    SELECT s.id, s.title, s.directory, s.time_updated,
            datetime(s.time_created/1000,'unixepoch','localtime') AS created,
            datetime(s.time_updated/1000,'unixepoch','localtime') AS updated
-    FROM session s
+    FROM ${schema === "v2" ? "session_v2" : "session"} s
     WHERE s.directory LIKE ${sqlStr(dirFilter)}
       AND s.time_archived IS NULL
       ${selfClause}
       ${fromClause}
       ${toClause}
     ORDER BY s.time_updated DESC
-    LIMIT ${safeLimit};`;
+    LIMIT ${sourceLimit};`;
 
-  const rows = await querySqlite<SessionListRow>(db, sql);
+  const migratedIds = await migratedSessionIds(sources);
+  const rows = preferV2((await Promise.all(sources.map(async ({ db, schema }) =>
+    (await querySqlite<SessionListRow>(db, sql(schema, safeLimit + (schema === "v1" ? migratedIds.size : 0))))
+      .map((row) => ({ ...row, schema })),
+  ))).flat().filter((row) => row.schema === "v2" || !migratedIds.has(row.id)))
+    .sort((a, b) => b.time_updated - a.time_updated || a.id.localeCompare(b.id)).slice(0, safeLimit);
 
   if (rows.length === 0) {
     const rangeDesc =
@@ -536,42 +602,29 @@ export async function runSessionRead(input: {
     MAX_SESSION_OFFSET,
   );
 
-  const db = resolveDbPath();
-  const roleFilter =
-    role === "all" ? "" : `AND json_extract(m.data,'$.role') = ${sqlStr(role)}`;
-
-  const metaSql = `
-    SELECT title, directory FROM session
-    WHERE id = ${sqlStr(sessionId)} LIMIT 1;`;
-
-  const countSql = `
-    SELECT COUNT(*) AS count
-    FROM part p JOIN message m ON m.id = p.message_id
-    WHERE p.session_id = ${sqlStr(sessionId)}
-      AND json_extract(p.data,'$.type') = 'text'
-      ${roleFilter};`;
-
-  const pageSql = `
-    SELECT json_extract(m.data,'$.role') AS role,
-           json_extract(p.data,'$.text') AS text
-    FROM part p JOIN message m ON m.id = p.message_id
-    WHERE p.session_id = ${sqlStr(sessionId)}
-      AND json_extract(p.data,'$.type') = 'text'
-      ${roleFilter}
-    ORDER BY p.time_created ASC, p.id ASC
-    LIMIT ${safeLimit} OFFSET ${safeOffset};`;
+  const sources = await sessionSources();
+  const roleFilter = role === "all" ? "" : `AND role = ${sqlStr(role)}`;
 
   type Meta = { title: string; directory: string };
   type CountRow = { count: number };
   type MsgRow = { role: string; text: string };
 
-  const [meta, countRows, rows] = await Promise.all([
-    querySqlite<Meta>(db, metaSql),
-    querySqlite<CountRow>(db, countSql),
-    querySqlite<MsgRow>(db, pageSql),
-  ]);
+  let selected: Source | undefined;
+  let meta: Meta[] = [];
+  // Migration retains old tables and IDs. Always use the v2 copy when present.
+  for (const source of [...sources].sort((a, b) => a.schema === b.schema ? 0 : a.schema === "v2" ? -1 : 1)) {
+    const found = await querySqlite<Meta>(source.db,
+      `SELECT title, directory FROM ${source.schema === "v2" ? "session_v2" : "session"} WHERE id = ${sqlStr(sessionId)} LIMIT 1;`);
+    if (found.length) { selected = source; meta = found; break; }
+  }
+  if (!selected) return `Session "${sessionId}" not found.`;
 
-  if (meta.length === 0) return `Session "${sessionId}" not found.`;
+  const ranked = rankedText(selected.schema);
+  const filter = `session_id = ${sqlStr(sessionId)} ${roleFilter}`;
+  const [countRows, rows] = await Promise.all([
+    querySqlite<CountRow>(selected.db, `WITH ranked AS (${ranked}) SELECT COUNT(*) AS count FROM ranked WHERE ${filter};`),
+    querySqlite<MsgRow>(selected.db, `WITH ranked AS (${ranked}) SELECT role, text FROM ranked WHERE ${filter} ORDER BY pos LIMIT ${safeLimit} OFFSET ${safeOffset};`),
+  ]);
 
   const total = countRows[0]?.count ?? 0;
 

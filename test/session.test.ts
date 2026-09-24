@@ -8,7 +8,7 @@
  */
 
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { copyFileSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -490,5 +490,103 @@ describe("runSessionRead", () => {
     // Not an injection, but validates sqlStr() is correctly applied.
     const out = await runSessionRead({ sessionId: "ses-a' OR 1=1--" });
     expect(out).toContain("not found");
+  });
+});
+
+describe("OpenCode v2 sessions", () => {
+  const v2db = join(tmp, "v2.db");
+  const mixedDb = join(tmp, "mixed.db");
+  const noSchemaDb = join(tmp, "empty.db");
+
+  async function createV2(db: string) {
+    await Bun.$`sqlite3 ${db} ${`
+      CREATE TABLE session_v2 (id TEXT PRIMARY KEY, title TEXT, directory TEXT, time_created INTEGER, time_updated INTEGER, time_archived INTEGER);
+      CREATE TABLE session_message (id TEXT PRIMARY KEY, session_id TEXT, type TEXT, seq INTEGER, time_created INTEGER, data TEXT);
+    `}`.quiet();
+    const statements = [
+      `INSERT INTO session_v2 VALUES ('ses-v2','V2 retry policy','/tmp/v2project',1700000400000,1700000500000,NULL)`,
+      `INSERT INTO session_message VALUES ('v2-m2','ses-v2','assistant',2,1700000402000,${sqlStr(JSON.stringify({ content: [{ type: "text", text: "first assistant item" }, { type: "tool", text: "not indexed" }, { type: "text", text: "jitter retry result" }] }))})`,
+      `INSERT INTO session_message VALUES ('v2-m1','ses-v2','user',1,1700000401000,${sqlStr(JSON.stringify({ text: "retry question" }))})`,
+      `INSERT INTO session_v2 VALUES ('ses-b','Migrated B','/tmp/v2project',1700000500000,1700000600000,NULL)`,
+      `INSERT INTO session_message VALUES ('v2-m3','ses-b','user',1,1700000500000,${sqlStr(JSON.stringify({ text: "migrated only text" }))})`,
+      `INSERT INTO session_v2 VALUES ('ses-v2-archived','Archived V2','/tmp/v2project',1700000700000,1700000800000,1700000900000)`,
+    ];
+    for (const statement of statements) await Bun.$`sqlite3 ${db} ${statement}`.quiet();
+  }
+
+  beforeAll(async () => {
+    await createV2(v2db);
+    copyFileSync(DB_PATH, mixedDb);
+    await createV2(mixedDb);
+    await Bun.$`sqlite3 ${noSchemaDb} ${"CREATE TABLE unrelated (id TEXT);"}`.quiet();
+  });
+
+  test("reads v2 user and assistant text in seq and content order", async () => {
+    process.env.OPENCODE_DB = v2db;
+    const read = await runSessionRead({ sessionId: "ses-v2" });
+    expect(read.indexOf("retry question")).toBeLessThan(read.indexOf("first assistant item"));
+    expect(read.indexOf("first assistant item")).toBeLessThan(read.indexOf("jitter retry result"));
+    expect(read).not.toContain("not indexed");
+    expect(read).toContain("1–3 of 3");
+    expect(await runSessionRead({ sessionId: "ses-v2", role: "assistant", offset: 1 })).toContain("jitter retry result");
+  });
+
+  test("search offsets point to the exact v2 text item", async () => {
+    process.env.OPENCODE_DB = v2db;
+    const search = await runSessionSearch({ query: "jitter" });
+    expect(search).toContain('session_read(session_id="ses-v2", offset=2)');
+    expect(await runSessionRead({ sessionId: "ses-v2", offset: 2, limit: 1 })).toContain("jitter retry result");
+    expect(await runSessionSearch({ query: "not indexed" })).toContain("No sessions found");
+  });
+
+  test("deduplicates migrated IDs in a mixed-schema database and prefers v2 text", async () => {
+    process.env.OPENCODE_DB = mixedDb;
+    const list = await runSessionList({});
+    expect(list.match(/id: +ses-b\b/g)).toHaveLength(1);
+    expect(list).toContain("Migrated B");
+    expect(list).not.toContain("Retry policy notes");
+    expect((await runSessionSearch({ query: "migrated only" })).match(/id: ses-b\b/g)).toHaveLength(1);
+    expect(await runSessionSearch({ query: "exponential" })).not.toContain("ses-b");
+    const limited = await runSessionSearch({ query: "retry", limit: 2 });
+    expect(limited).toContain("ses-v2");
+    expect(limited).toContain("ses-c");
+    expect(await runSessionRead({ sessionId: "ses-b" })).toContain("migrated only text");
+    expect(await runSessionRead({ sessionId: "ses-b" })).not.toContain("how should we retry?");
+    expect(list).not.toContain("ses-v2-archived");
+  });
+
+  test("discovers separate XDG v2 and home-relative v1 databases", async () => {
+    const home = join(tmp, "home");
+    const xdg = join(tmp, "xdg");
+    mkdirSync(join(home, ".local/share/opencode"), { recursive: true });
+    mkdirSync(join(xdg, "opencode"), { recursive: true });
+    copyFileSync(DB_PATH, join(home, ".local/share/opencode/opencode.db"));
+    copyFileSync(v2db, join(xdg, "opencode/opencode.db"));
+    const originalHome = process.env.HOME;
+    const originalXdg = process.env.XDG_DATA_HOME;
+    delete process.env.OPENCODE_DB;
+    process.env.HOME = home;
+    process.env.XDG_DATA_HOME = xdg;
+    try {
+      const list = await runSessionList({});
+      expect(list).toContain("ses-a");
+      expect(list).toContain("ses-v2");
+      expect(list.match(/id: +ses-b\b/g)).toHaveLength(1);
+      expect(await runSessionRead({ sessionId: "ses-b" })).toContain("migrated only text");
+    } finally {
+      process.env.OPENCODE_DB = DB_PATH;
+      if (originalHome === undefined) delete process.env.HOME;
+      else process.env.HOME = originalHome;
+      if (originalXdg === undefined) delete process.env.XDG_DATA_HOME;
+      else process.env.XDG_DATA_HOME = originalXdg;
+    }
+  });
+
+  test("returns friendly empty responses with no supported tables", async () => {
+    process.env.OPENCODE_DB = noSchemaDb;
+    expect(await runSessionList({})).toContain("No sessions found");
+    expect(await runSessionSearch({ query: "retry" })).toContain("No sessions found");
+    expect(await runSessionRead({ sessionId: "ses-a" })).toContain("not found");
+    process.env.OPENCODE_DB = DB_PATH;
   });
 });
