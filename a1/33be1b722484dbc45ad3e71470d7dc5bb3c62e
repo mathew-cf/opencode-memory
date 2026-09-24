@@ -1,0 +1,21 @@
+README.md
+  s_cac42624106fcd::t_fe7acd1d855e33 25-27,30-40
+package.json
+  s_cac42624106fcd::t_4b5287aa07f6be 27-30
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "a133be1b722484dbc45ad3e71470d7dc5bb3c62e",
+  "prompts": {},
+  "sessions": {
+    "s_cac42624106fcd": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a0d536-7103-75f3-a803-4eea73173ad9",
+        "model": "unknown"
+      },
+      "human_author": "Mathew Jacob <mathew@cloudflare.com>"
+    }
+  }
+}
