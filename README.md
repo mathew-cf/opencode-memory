@@ -41,7 +41,7 @@ OpenCode v1:
 ```jsonc
 // opencode.jsonc
 {
-  "plugin": ["@mathew-cf/opencode-memory@1.2.1"]
+  "plugin": ["@mathew-cf/opencode-memory@1.3.0"]
 }
 ```
 
