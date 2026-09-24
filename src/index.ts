@@ -8,13 +8,44 @@
  *  - Config modifications (skill path, agent prompts, permission rules)
  */
 
-import type { Plugin } from "@opencode-ai/plugin";
+import { tool, type Plugin, type ToolDefinition as V1ToolDefinition } from "@opencode-ai/plugin";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { applyConfig } from "./config";
 import { createGuardHooks } from "./hooks/guard";
+import type { ToolDefinition } from "./lib/tool-definition";
 import * as memory from "./tools/memory";
 import * as session from "./tools/session";
+
+function adaptTool(definition: ToolDefinition): V1ToolDefinition {
+  return tool({
+    description: definition.description,
+    args: definition.input.shape as unknown as Parameters<typeof tool>[0]["args"],
+    async execute(input, context) {
+      return (await definition.execute(input, context)).content;
+    },
+  });
+}
+
+type AdaptedTools<Source, Keys extends keyof Source> = Omit<Source, Keys> & Record<Keys, V1ToolDefinition>;
+
+const memoryTools: AdaptedTools<typeof memory, "search" | "read" | "list" | "save" | "access" | "setup"> = {
+  ...memory,
+  search: adaptTool(memory.search),
+  read: adaptTool(memory.read),
+  list: adaptTool(memory.list),
+  save: adaptTool(memory.save),
+  access: adaptTool(memory.access),
+  setup: adaptTool(memory.setup),
+};
+
+const sessionTools: AdaptedTools<typeof session, "search" | "searchAll" | "read" | "list"> = {
+  ...session,
+  search: adaptTool(session.search),
+  searchAll: adaptTool(session.searchAll),
+  read: adaptTool(session.read),
+  list: adaptTool(session.list),
+};
 
 /**
  * Locate the `skills/` directory that ships with this package. Works
@@ -47,16 +78,16 @@ const MemoryPlugin: Plugin = async () => {
   // tool map so agents can call `memory_search` rather than
   // `opencode-memory_search` etc.
   const tools = {
-    memory_search: memory.search,
-    memory_read: memory.read,
-    memory_list: memory.list,
-    memory_save: memory.save,
-    memory_access: memory.access,
-    memory_setup: memory.setup,
-    session_search: session.search,
-    session_search_all: session.searchAll,
-    session_read: session.read,
-    session_list: session.list,
+    memory_search: memoryTools.search,
+    memory_read: memoryTools.read,
+    memory_list: memoryTools.list,
+    memory_save: memoryTools.save,
+    memory_access: memoryTools.access,
+    memory_setup: memoryTools.setup,
+    session_search: sessionTools.search,
+    session_search_all: sessionTools.searchAll,
+    session_read: sessionTools.read,
+    session_list: sessionTools.list,
   };
 
   return {
@@ -100,5 +131,4 @@ export {
   matchesToolName,
   type SessionState,
 } from "./hooks/guard";
-export * as memoryTools from "./tools/memory";
-export * as sessionTools from "./tools/session";
+export { memoryTools, sessionTools };

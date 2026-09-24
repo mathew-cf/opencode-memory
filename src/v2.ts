@@ -3,10 +3,10 @@ import { readFile, realpath } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { Plugin, Skill } from "@opencode/plugin";
-import { tool as legacyTool, type ToolDefinition } from "@opencode-ai/plugin";
 import { buildMemoryPromptAppendix } from "./config";
 import { createGuardHooks, afterToolUpdate, buildCompactionContext } from "./hooks/guard";
 import { normalizeDirPath, resolveMemoryDir } from "./lib/paths";
+import type { ToolDefinition } from "./lib/tool-definition";
 import * as memory from "./tools/memory";
 import * as session from "./tools/session";
 
@@ -38,19 +38,7 @@ export default Plugin.define({
       for (const [name, definition] of Object.entries(definitions)) {
         editor.add({
           name,
-          description: definition.description,
-          input: legacyTool.schema.object(definition.args),
-          execute: async (input, context) => {
-            // The v1 wrappers already call the shared run* functions. Adapt
-            // their context and return the v2 structured result.
-            const result = await definition.execute(input, {
-              sessionID: context.sessionID,
-              messageID: context.messageID,
-              agent: context.agent,
-              abort: context.signal,
-            } as unknown as Parameters<typeof definition.execute>[1]);
-            return { content: typeof result === "string" ? result : result.output };
-          },
+          ...definition,
         });
       }
     });

@@ -20,7 +20,8 @@ bun run typecheck && bun test && bun run build
 
 ```
 src/
-  index.ts              # OpenCode plugin entry — wires tools, hooks, config
+  index.ts              # OpenCode v1 adapter — wires tools, hooks, config
+  v2.ts                 # OpenCode v2 plugin entry
   cli.ts                # `opencode-memory` bin: init / status / help
   config.ts             # applyConfig() — skills.paths, agent prompts, permissions
   constants.ts          # CATEGORIES, DEFAULT_MEMORY_SUBDIR, STOP_WORDS
@@ -30,6 +31,7 @@ src/
     search-terms.ts     # parseSearchTerms, countTermMatches, scoreCandidate
     rag.ts              # ensureRag, ragSearch, spawnRagIndex, downloadModel
     db.ts               # resolveDbPath, sqlStr, querySqlite
+    tool-definition.ts  # v2-oriented tool definition helper
   tools/
     memory.ts           # search / list / save / access / setup
     session.ts          # search / read / list (reads opencode.db)
@@ -54,18 +56,19 @@ scripts/
 
 ## Architecture
 
-This package ships two independent surfaces against the same shared core:
+This package ships three surfaces against the same shared core:
 
 | Surface           | Entry point    | Audience                               |
 | ----------------- | -------------- | -------------------------------------- |
-| OpenCode plugin   | `src/index.ts` | OpenCode (tools + hooks + auto-config) |
+| OpenCode v1       | `src/index.ts` | V1 adapter for tools, hooks, and config |
+| OpenCode v2       | `src/v2.ts`   | Native tool, hook, and skill registration |
 | `opencode-memory` | `src/cli.ts`   | Humans (`init`, `status`) + post-install |
 
-Both share `src/tools/memory.ts` and `src/lib/*`. Adding a new memory tool means changing `tools/memory.ts` and registering it in the OpenCode plugin tool map in `index.ts`.
+Both plugins share `src/tools/memory.ts`, `src/tools/session.ts`, and `src/lib/*`. Tool definitions use the v2 input and result shape; `index.ts` adapts them for v1.
 
 ### OpenCode plugin entry (`src/index.ts`)
 
-Exports a default `Plugin` function. On load it returns:
+Exports a default v1 plugin object. Its `server` function returns:
 
 - **`tool`** — custom tools keyed with the `memory_` / `session_` prefixes so names match what skills and prompts already reference
 - **`config`** — calls `applyConfig()` to register the bundled skill directory, add edit/external_directory permissions for `~/opencode-memory/**`, and prepend the memory-awareness appendix to the built-in subagent prompts
@@ -77,7 +80,7 @@ Exports a default `Plugin` function. On load it returns:
 Every tool has two layers:
 
 1. **`runXxx(input)`** — pure TypeScript function, no `tool()` wrapper. Takes plain arguments, reads env lazily, returns a string. Covered directly by integration tests.
-2. **`tool({ description, args, execute })`** — thin wrapper that calls `runXxx` from the `execute` handler. Encodes the LLM-facing schema and docs.
+2. **`defineTool({ description, input, execute })`** — a v2-oriented definition that calls `runXxx` and returns `{ content }`. The v1 entry converts its input shape and result.
 
 This lets tests cover the real behaviour without constructing a fake OpenCode context.
 
@@ -93,7 +96,7 @@ The `rag` CLI is optional. `ensureRag()` silently tries a `cargo install` fallba
 
 - **Runtime**: Bun. No Node-only APIs in src or test.
 - **Imports**: `node:` prefix for Node builtins (`node:path`, `node:fs/promises`, `node:os`).
-- **Tool definitions**: use `tool()` from `@opencode-ai/plugin` with `tool.schema` arg descriptors. Keep descriptions actionable — they're the LLM's only spec.
+- **Tool definitions**: use `defineTool()` with `zod/v4` input schemas. Keep descriptions actionable — they're the LLM's only spec. Only the v1 adapter imports `@opencode-ai/plugin`.
 - **Error handling**: tool execute paths catch exceptions and return strings. Never throw to the caller; the agent reads whatever you return.
 - **Types**: keep shared types in the file that owns the logic (e.g. `SessionState` in `hooks/guard.ts`). Only hoist to a top-level `types.ts` when two unrelated modules need the same shape.
 - **Pure helpers live in `src/lib/`**. If a helper uses the filesystem or the shell, it belongs in the tool that calls it.
@@ -110,8 +113,8 @@ The `rag` CLI is optional. `ensureRag()` silently tries a `cargo install` fallba
 
 1. Add a file (or new exports) under `src/tools/`.
 2. Write the pure `runXxx(input)` function first. It should be callable from a test with plain arguments and return a string.
-3. Wrap it with `tool({ description, args, execute })` for the OpenCode plugin surface. Keep the description opinionated — tell the agent when to call it and what to look for in the output. Annotate the export with `ToolDefinition` (otherwise TypeScript can't name the inferred type due to zod-v3-vs-v4 drift in transitive deps).
-4. Register it in `src/index.ts` under the appropriate namespace (`memory_xxx` or `session_xxx`).
+3. Wrap it with `defineTool({ description, input, execute })`. Keep the description opinionated — tell the agent when to call it and what to look for in the output.
+4. Register it in `src/v2.ts` and adapt it in `src/index.ts` under the appropriate namespace (`memory_xxx` or `session_xxx`).
 5. Write tests for both the pure helpers **and** the integration path.
 6. If the tool needs a new permission or a new agent prompt, update `src/config.ts` and `test/config.test.ts`.
 

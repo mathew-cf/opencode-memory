@@ -7,12 +7,13 @@
  * tests can override them.
  */
 
-import { tool, type ToolDefinition } from "@opencode-ai/plugin";
 import { existsSync } from "node:fs";
+import { z } from "zod/v4";
 import { searchCodexSessions } from "../lib/codex-session-search";
 import { querySqlite, resolveDbPaths, sqlStr } from "../lib/db";
 import { searchPiSessions } from "../lib/pi-session-search";
 import { parseSearchTerms } from "../lib/search-terms";
+import { defineTool } from "../lib/tool-definition";
 import {
   searchSessionProviders,
   type SessionSearchProvider,
@@ -202,32 +203,32 @@ function sliceCodePointSafe(text: string, start: number, maxChars: number): { te
 
 // --- Tools -------------------------------------------------------------
 
-export const searchAll: ToolDefinition = tool({
+export const searchAll = defineTool({
   description:
     "Search previous OpenCode, Pi, and Codex sessions concurrently by keyword. " +
     "Unavailable or uninstalled session backends are reported without failing available searches. " +
     "Multi-term queries match sessions containing ANY search term (OR logic); sessions matching more " +
     "terms rank higher. Results are grouped by source; limit applies per source.",
-  args: {
-    query: tool.schema.string().describe("Keyword or phrase to search for"),
-    limit: tool.schema
+  input: z.object({
+    query: z.string().describe("Keyword or phrase to search for"),
+    limit: z
       .number()
       .optional()
       .describe("Max sessions to return per source (default 10)"),
-    directory: tool.schema
+    directory: z
       .string()
       .optional()
       .describe(
         "Filter to sessions from a specific project directory (substring match)",
       ),
-  },
+  }),
   async execute({ query, limit = 10, directory }, context) {
-    return runAllSessionSearch({
+    return { content: await runAllSessionSearch({
       query,
       limit,
       directory,
       currentSessionId: context.sessionID,
-    });
+    }) };
   },
 });
 
@@ -260,27 +261,27 @@ export async function runAllSessionSearch(
   return searchSessionProviders(request, activeProviders);
 }
 
-export const search: ToolDefinition = tool({
+export const search = defineTool({
   description:
     "Search previous OpenCode sessions by keyword. Searches both session titles and message content. " +
     "Multi-term queries match sessions containing ANY search term (OR logic); sessions matching more " +
     "terms rank higher. Returns matching sessions with snippets and a match_offset you can pass to " +
     "session_read to jump directly to the relevant part of a long session.",
-  args: {
-    query: tool.schema.string().describe("Keyword or phrase to search for"),
-    limit: tool.schema.number().optional().describe("Max sessions to return (default 10)"),
-    directory: tool.schema
+  input: z.object({
+    query: z.string().describe("Keyword or phrase to search for"),
+    limit: z.number().optional().describe("Max sessions to return (default 10)"),
+    directory: z
       .string()
       .optional()
       .describe("Filter to sessions from a specific project directory (substring match)"),
-  },
+  }),
   async execute({ query, limit = 10, directory }, context) {
-    return runSessionSearch({
+    return { content: await runSessionSearch({
       query,
       limit,
       directory,
       currentSessionId: context.sessionID,
-    });
+    }) };
   },
 });
 
@@ -420,42 +421,42 @@ export async function runSessionSearch(input: {
   return lines.join("\n");
 }
 
-export const list: ToolDefinition = tool({
+export const list = defineTool({
   description:
     "List OpenCode sessions ordered by most-recently-updated, optionally filtered by time range " +
     "and/or project directory. Useful for browsing recent work or finding sessions from a specific period.",
-  args: {
-    from: tool.schema
+  input: z.object({
+    from: z
       .string()
       .optional()
       .describe(
         "Start of time range, inclusive (ISO 8601, e.g. '2024-01-01' or '2024-01-01T09:00:00')",
       ),
-    to: tool.schema
+    to: z
       .string()
       .optional()
       .describe(
         "End of time range, inclusive (ISO 8601, e.g. '2024-01-31' or '2024-01-31T23:59:59')",
       ),
-    directory: tool.schema
+    directory: z
       .string()
       .optional()
       .describe(
         "Filter to sessions from a specific project directory (substring match)",
       ),
-    limit: tool.schema
+    limit: z
       .number()
       .optional()
       .describe("Max sessions to return (default 20)"),
-  },
+  }),
   async execute({ from, to, directory, limit = 20 }, context) {
-    return runSessionList({
+    return { content: await runSessionList({
       from,
       to,
       directory,
       limit,
       currentSessionId: context.sessionID,
-    });
+    }) };
   },
 });
 
@@ -526,50 +527,50 @@ export async function runSessionList(input: {
   return `Found ${rows.length} session(s):\n\n${lines.join("\n\n")}`;
 }
 
-export const read: ToolDefinition = tool({
+export const read = defineTool({
   description:
     "Read a bounded portion of a previous OpenCode session in order. Returns user and assistant text " +
     "messages, capped at about 16,000 text characters per call. Use offset and limit to page through " +
     "messages; when an individual message is truncated, reuse its offset with the returned " +
     "message_char_offset to continue without losing content. session_search returns a match_offset " +
     "you can use as offset to jump directly to relevant content.",
-  args: {
-    session_id: tool.schema
+  input: z.object({
+    session_id: z
       .string()
       .describe("Session ID (from session_search results)"),
-    limit: tool.schema
+    limit: z
       .number()
       .optional()
       .describe("Number of messages to return (default 30)"),
-    offset: tool.schema
+    offset: z
       .number()
       .optional()
       .describe(
         "Skip the first N text messages — use match_offset from session_search to jump to relevant content (default 0)",
       ),
-    message_char_offset: tool.schema
+    message_char_offset: z
       .number()
       .optional()
       .describe(
         "Character offset within the first selected message (default 0); use the continuation value returned when a message exceeds the output bound",
       ),
-    role: tool.schema
+    role: z
       .enum(["all", "user", "assistant"])
       .optional()
       .describe('Filter by role: "user", "assistant", or "all" (default "all")'),
-  },
+  }),
   async execute(
     { session_id, limit = 30, offset = 0, message_char_offset = 0, role = "all" },
     context,
   ) {
-    return runSessionRead({
+    return { content: await runSessionRead({
       sessionId: session_id,
       limit,
       offset,
       messageCharOffset: message_char_offset,
       role,
       currentSessionId: context.sessionID,
-    });
+    }) };
   },
 });
 

@@ -6,12 +6,13 @@
  * `$OPENCODE_MEMORY_DIR` before importing.
  */
 
-import { tool, type ToolDefinition } from "@opencode-ai/plugin";
 import { Database } from "bun:sqlite";
 import { mkdirSync } from "node:fs";
 import { realpath } from "node:fs/promises";
 import { posix } from "node:path";
+import { z } from "zod/v4";
 import { CATEGORIES } from "../constants";
+import { defineTool } from "../lib/tool-definition";
 import { parseFrontmatter, todayISO, type FrontMatter } from "../lib/frontmatter";
 import {
   formatMemoryDirForDisplay,
@@ -179,21 +180,21 @@ export function memorySaveDescription(memoryDir?: string): string {
 
 // --- Tools --------------------------------------------------------------
 
-export const search: ToolDefinition = tool({
+export const search = defineTool({
   description: memorySearchDescription(),
-  args: {
-    query: tool.schema.string().describe("Search terms or natural language query"),
-    category: tool.schema
+  input: z.object({
+    query: z.string().describe("Search terms or natural language query"),
+    category: z
       .enum(CATEGORIES)
       .optional()
       .describe("Filter to a specific memory category"),
-    detail: tool.schema
+    detail: z
       .enum(["compact", "normal", "debug"])
       .optional()
       .describe('Output detail: "compact", "normal" (default), or "debug" for ranking diagnostics'),
-  },
+  }),
   async execute({ query, category, detail = "normal" }) {
-    return runSearch({ query, category, detail });
+    return { content: await runSearch({ query, category, detail }) };
   },
 });
 
@@ -422,16 +423,16 @@ export async function runSearch(input: {
   return lines.join("\n");
 }
 
-export const list: ToolDefinition = tool({
+export const list = defineTool({
   description: memoryListDescription(),
-  args: {
-    category: tool.schema
+  input: z.object({
+    category: z
       .enum(CATEGORIES)
       .optional()
       .describe("Memory category to list"),
-  },
+  }),
   async execute({ category }) {
-    return runList({ category });
+    return { content: await runList({ category }) };
   },
 });
 
@@ -571,28 +572,28 @@ async function resolveRealPathContained(memoryDir: string, filePath: string): Pr
   return realFile;
 }
 
-export const read: ToolDefinition = tool({
+export const read = defineTool({
   description:
     "Read a bounded portion of one memory file and automatically record successful access. " +
     "Returns frontmatter plus either the named Markdown heading section or the beginning of the body, " +
     "with truncation/continuation metadata. Prefer this over the general Read tool after memory_search.",
-  args: {
-    path: tool.schema.string().describe(memoryAccessPathDescription()),
-    heading: tool.schema
+  input: z.object({
+    path: z.string().describe(memoryAccessPathDescription()),
+    heading: z
       .string()
       .optional()
       .describe('Optional Markdown heading text to select (for example, "Build and test")'),
-    offset: tool.schema
+    offset: z
       .number()
       .optional()
       .describe("Character offset within the selected body or heading section (default 0)"),
-    max_chars: tool.schema
+    max_chars: z
       .number()
       .optional()
       .describe("Maximum memory-content characters to return, including bounded frontmatter (default 4000, maximum 16000)"),
-  },
+  }),
   async execute({ path, heading, offset = 0, max_chars = DEFAULT_READ_CHARS }) {
-    return runRead({ path, heading, offset, maxChars: max_chars });
+    return { content: await runRead({ path, heading, offset, maxChars: max_chars }) };
   },
 });
 
@@ -656,17 +657,17 @@ export async function runRead(input: {
   return `${memoryContent}${memoryContent.endsWith("\n") ? "" : "\n"}\n---\n${metadata}`;
 }
 
-export const access: ToolDefinition = tool({
+export const access = defineTool({
   description:
     "Record that a memory file was accessed (read and used). Updates sidecar access telemetry " +
     "without rewriting the memory file. Call this AFTER reading a memory file " +
     "that you actually used to inform your work — not for casual browsing.\n\n" +
     "This helps the memory system track which memories are actively useful vs. stale.",
-  args: {
-    path: tool.schema.string().describe(memoryAccessPathDescription()),
-  },
+  input: z.object({
+    path: z.string().describe(memoryAccessPathDescription()),
+  }),
   async execute({ path }) {
-    return runAccess({ path });
+    return { content: await runAccess({ path }) };
   },
 });
 
@@ -700,11 +701,11 @@ export async function runAccess(input: { path: string }): Promise<string> {
   }
 }
 
-export const save: ToolDefinition = tool({
+export const save = defineTool({
   description: memorySaveDescription(),
-  args: {},
+  input: z.object({}),
   async execute() {
-    return runSave();
+    return { content: await runSave() };
   },
 });
 
@@ -739,14 +740,14 @@ export async function runSave(): Promise<string> {
   return kickedOffIndex ? result : `${result}\n\n${installGuidance()}`;
 }
 
-export const setup: ToolDefinition = tool({
+export const setup = defineTool({
   description:
     "Reports whether `@mathew-cf/rag-cli` is resolvable from this plugin's " +
     "node_modules and prints installation guidance if not. Safe to run at " +
     "any time — does not modify anything.",
-  args: {},
+  input: z.object({}),
   async execute() {
-    return runSetup();
+    return { content: await runSetup() };
   },
 });
 
