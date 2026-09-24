@@ -1,0 +1,25 @@
+README.md
+  s_cac42624106fcd::t_a5568fe723edde 60
+src/tools/memory.ts
+  s_cac42624106fcd::t_37f416fa82d792 745,755,759,762,773
+test/memory.test.ts
+  s_cac42624106fcd::t_fc6c6405536d8e 518,524
+test/rag.test.ts
+  s_cac42624106fcd::t_43bcbe10d7b25b 2-29
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "3cfc385497bef97518e7fd3ff0aba511b9e90e64",
+  "prompts": {},
+  "sessions": {
+    "s_cac42624106fcd": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a0d536-7103-75f3-a803-4eea73173ad9",
+        "model": "unknown"
+      },
+      "human_author": "Mathew Jacob <mathew@cloudflare.com>"
+    }
+  }
+}
