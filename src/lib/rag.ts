@@ -2,11 +2,9 @@
  * Thin wrappers around the `rag` CLI (https://github.com/mathew-cf/rag-cli).
  *
  * `@mathew-cf/rag-cli` is declared as a runtime dependency of this plugin,
- * so its JS shim is always available in `node_modules/@mathew-cf/rag-cli/
- * bin/rag.js` after installation. The shim handles platform detection and
- * execs the platform-specific prebuilt binary published alongside it.
+ * so its JS shim and a native binary for supported platforms are installed.
  *
- * We resolve the shim's absolute path via `require.resolve` at call time
+ * We resolve the native binary from the shim's package context at call time
  * rather than trusting `$PATH`, because:
  *   - opencode installs plugins into a cache dir whose `node_modules/.bin`
  *     is NOT on $PATH when the plugin's code runs.
@@ -26,21 +24,28 @@ import { createRequire } from "node:module";
 const require = createRequire(import.meta.url);
 
 export interface RagStatus {
-  /** Absolute path to the JS shim, if resolvable. `null` otherwise. */
-  shimPath: string | null;
+  /** Absolute path to the native executable, if resolvable. */
+  binaryPath: string | null;
 }
 
 /**
- * Locate the rag shim via node module resolution. Returns `null` when the
- * package isn't installed (usually indicates the user added the plugin
- * via a non-standard loader that skipped optionalDependencies or the
- * rag-cli package failed to install for their platform).
+ * Resolve the native executable relative to rag-cli's shim. Resolving from
+ * there also works when the platform package is nested under rag-cli rather
+ * than hoisted next to this plugin. A JS shim cannot be spawned directly on
+ * Windows, so a missing platform package must return null.
  *
  * Exported so tests can assert the resolution behaviour directly.
  */
-export function resolveRagBinary(): string | null {
+export function resolveRagBinary(
+  platform = process.platform,
+  arch = process.arch,
+  resolveFromShim?: (specifier: string) => string,
+): string | null {
   try {
-    return require.resolve("@mathew-cf/rag-cli/bin/rag.js");
+    const shim = require.resolve("@mathew-cf/rag-cli/bin/rag.js");
+    const resolve = resolveFromShim ?? createRequire(shim).resolve;
+    const filename = platform === "win32" ? "rag.exe" : "rag";
+    return resolve(`@mathew-cf/rag-cli-${platform}-${arch}/bin/${filename}`);
   } catch {
     return null;
   }
@@ -52,10 +57,10 @@ export function resolveRagBinary(): string | null {
  * caching, version checks, or alternate lookup paths has a single home.
  */
 export function probeRag(): RagStatus {
-  return { shimPath: resolveRagBinary() };
+  return { binaryPath: resolveRagBinary() };
 }
 
-/** True iff the shim is resolvable. */
+/** True iff the native executable is resolvable. */
 export function ragAvailable(): boolean {
   return resolveRagBinary() !== null;
 }
@@ -69,12 +74,12 @@ export function ragAvailable(): boolean {
  */
 export function installGuidance(): string {
   return [
-    "Semantic search is unavailable: the `@mathew-cf/rag-cli` package",
+    "Semantic search is unavailable: the native `@mathew-cf/rag-cli` binary",
     "could not be resolved from this plugin's node_modules.",
     "",
     "Usually this means one of:",
     "  - Your host platform isn't covered by the prebuilt binaries",
-    "    (supported: macOS ARM64/x64, Linux x64/ARM64).",
+    "    (supported: macOS ARM64/x64, Linux x64/ARM64, Windows x64).",
     "  - `npm install` or the equivalent plugin install skipped",
     "    optionalDependencies.",
     "",
@@ -91,7 +96,7 @@ export function installGuidance(): string {
 
 /**
  * Run `rag search` against an index. Returns the raw JSON text so callers
- * can parse it themselves. Any failure (missing shim, missing index,
+ * can parse it themselves. Any failure (missing binary, missing index,
  * parse error upstream) resolves to the empty string — degrading
  * gracefully rather than propagating shell exceptions.
  */
@@ -103,8 +108,14 @@ export interface RagCommandResult {
 
 export type RagCommandRunner = (argv: string[]) => Promise<RagCommandResult>;
 
+/** Rust's home-directory lookup needs HOME even on Windows. */
+export function ragProcessEnv(env: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
+  const home = env.HOME || env.USERPROFILE;
+  return home ? { ...env, HOME: home } : { ...env };
+}
+
 async function runRagCommand(argv: string[]): Promise<RagCommandResult> {
-  const process = Bun.spawn(argv, { stdout: "pipe", stderr: "pipe" });
+  const process = Bun.spawn(argv, { stdout: "pipe", stderr: "pipe", env: ragProcessEnv() });
   const [exitCode, stdout, stderr] = await Promise.all([
     process.exited,
     new Response(process.stdout).text(),
@@ -126,12 +137,12 @@ function groupBySourceUnsupported(stderr: string): boolean {
  * the installed binary.
  */
 export async function runRagSearch(
-  shim: string,
+  binary: string,
   args: { query: string; indexDir: string; topK?: number },
   runner: RagCommandRunner = runRagCommand,
 ): Promise<string> {
   const base = [
-    shim,
+    binary,
     "search",
     args.query,
     "-i",
@@ -158,9 +169,9 @@ export async function ragSearch(args: {
   indexDir: string;
   topK?: number;
 }): Promise<string> {
-  const shim = resolveRagBinary();
-  if (!shim) return "";
-  return runRagSearch(shim, args).catch(() => "");
+  const binary = resolveRagBinary();
+  if (!binary) return "";
+  return runRagSearch(binary, args).catch(() => "");
 }
 
 /**
@@ -168,34 +179,42 @@ export async function ragSearch(args: {
  * not block on the index build because it can be slow on large corpora
  * and users don't want their save operations to stall.
  *
- * Returns `true` if we kicked off an index build, `false` if the shim
+ * Returns `true` if we kicked off an index build, `false` if the binary
  * couldn't be resolved.
  */
 export function spawnRagIndex(args: {
   memoryDir: string;
   indexDir: string;
 }): boolean {
-  const shim = resolveRagBinary();
-  if (!shim) return false;
-  Bun.spawn([shim, "index", args.memoryDir, "-o", args.indexDir], {
-    stdout: "ignore",
-    stderr: "ignore",
-  });
-  return true;
+  const binary = resolveRagBinary();
+  if (!binary) return false;
+  try {
+    Bun.spawn([binary, "index", args.memoryDir, "-o", args.indexDir], {
+      stdout: "ignore",
+      stderr: "ignore",
+      env: ragProcessEnv(),
+    });
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 /**
  * Pre-download the embedding model by running `rag download`. Returns a
  * human-readable status string — either the command's output or the
- * installation guidance if the shim isn't resolvable.
+ * installation guidance if the binary isn't resolvable.
  */
 export async function downloadModel(): Promise<string> {
-  const shim = resolveRagBinary();
-  if (!shim) return installGuidance();
+  const binary = resolveRagBinary();
+  if (!binary) return installGuidance();
 
   try {
-    const out = await Bun.$`${shim} download`.text();
-    return out.trim() || "Model downloaded.";
+    const result = await runRagCommand([binary, "download"]);
+    if (result.exitCode !== 0) {
+      return `rag download failed: ${result.stderr.trim() || `exit code ${result.exitCode}`}`;
+    }
+    return result.stdout.trim() || "Model downloaded.";
   } catch (err) {
     return `rag download failed: ${String(err)}`;
   }

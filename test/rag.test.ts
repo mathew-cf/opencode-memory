@@ -1,5 +1,32 @@
 import { describe, expect, test } from "bun:test";
-import { runRagSearch, type RagCommandResult } from "../src/lib/rag";
+import { ragProcessEnv, resolveRagBinary, runRagSearch, type RagCommandResult } from "../src/lib/rag";
+
+describe("rag executable", () => {
+  test("resolves the Windows native executable instead of the JavaScript shim", () => {
+    const requested: string[] = [];
+    const binary = resolveRagBinary("win32", "x64", (specifier) => {
+      requested.push(specifier);
+      return "C:\\rag-cli\\bin\\rag.exe";
+    });
+    expect(requested).toEqual(["@mathew-cf/rag-cli-win32-x64/bin/rag.exe"]);
+    expect(binary).toBe("C:\\rag-cli\\bin\\rag.exe");
+  });
+
+  test("reports an absent platform package as unavailable", () => {
+    expect(resolveRagBinary("win32", "arm64", () => {
+      throw new Error("package not installed");
+    })).toBeNull();
+  });
+
+  test("passes USERPROFILE as HOME to the Rust process", () => {
+    expect(ragProcessEnv({ HOME: "", USERPROFILE: "C:\\Users\\mat", PATH: "bin" })).toEqual({
+      HOME: "C:\\Users\\mat",
+      USERPROFILE: "C:\\Users\\mat",
+      PATH: "bin",
+    });
+    expect(ragProcessEnv({ HOME: "/chosen", USERPROFILE: "C:\\Users\\mat" }).HOME).toBe("/chosen");
+  });
+});
 
 describe("runRagSearch", () => {
   test("requests one result per source from current rag-cli versions", async () => {

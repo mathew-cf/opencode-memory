@@ -515,13 +515,13 @@ describe("runSave", () => {
 });
 
 describe("runSetup", () => {
-  test("reports status lines for both ripgrep and the rag shim", async () => {
+  test("reports status lines for both ripgrep and the rag binary", async () => {
     const out = await runSetup();
     // We don't assume a particular install state — tests are run with
     // both deps linked, but the output shape should be consistent even
     // if one resolves and the other doesn't.
     expect(out).toContain("ripgrep (keyword search):");
-    expect(out).toContain("rag shim (semantic search):");
+    expect(out).toContain("rag binary (semantic search):");
   });
 
   test("reports 'All set' when both resolve, or guidance when one is missing", async () => {

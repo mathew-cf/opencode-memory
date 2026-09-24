@@ -742,7 +742,7 @@ export async function runSave(): Promise<string> {
 
 export const setup = defineTool({
   description:
-    "Reports whether `@mathew-cf/rag-cli` is resolvable from this plugin's " +
+    "Reports whether the native `@mathew-cf/rag-cli` binary is resolvable from this plugin's " +
     "node_modules and prints installation guidance if not. Safe to run at " +
     "any time — does not modify anything.",
   input: z.object({}),
@@ -752,14 +752,14 @@ export const setup = defineTool({
 });
 
 export async function runSetup(): Promise<string> {
-  const ragShim = resolveRagBinary();
+  const ragBinary = resolveRagBinary();
   const rgBin = resolveRgBinary();
   const lines: string[] = [];
   lines.push(`ripgrep (keyword search): ${rgBin ?? "NOT resolvable"}`);
-  lines.push(`rag shim (semantic search): ${ragShim ?? "NOT resolvable"}`);
+  lines.push(`rag binary (semantic search): ${ragBinary ?? "NOT resolvable"}`);
   lines.push("");
 
-  if (ragShim && rgBin) {
+  if (ragBinary && rgBin) {
     lines.push(
       "All set — both search backends are available. Run `rag download` " +
         "once to pre-cache the embedding model if you haven't already " +
@@ -770,7 +770,7 @@ export async function runSetup(): Promise<string> {
       lines.push(rgInstallGuidance());
       lines.push("");
     }
-    if (!ragShim) {
+    if (!ragBinary) {
       lines.push(installGuidance());
     }
   }
