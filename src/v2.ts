@@ -1,5 +1,5 @@
 /** OpenCode v2 entry point. The v1 entry remains at `.`. */
-import { readFile } from "node:fs/promises";
+import { readFile, realpath } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { Plugin, Skill } from "@opencode/plugin";
@@ -97,7 +97,7 @@ export default Plugin.define({
       }
     });
 
-    const skillPath = join(dirname(fileURLToPath(import.meta.url)), "..", "skills", "opencode-memory", "SKILL.md");
+    const skillPath = join(dirname(await realpath(fileURLToPath(import.meta.url))), "..", "skills", "opencode-memory", "SKILL.md");
     const content = await readFile(skillPath, "utf8");
     const description = content.match(/^description:\s*(.+)$/m)?.[1] ?? "Search and save durable memories.";
     await ctx.skill.transform((editor) => {
