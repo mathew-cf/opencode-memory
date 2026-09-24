@@ -24,6 +24,10 @@
       "types": "./dist/v2.d.ts",
       "default": "./dist/v2.js"
     },
+    "./server": {
+      "types": "./dist/v2.d.ts",
+      "default": "./dist/v2.js"
+    },
     "./package.json": "./package.json"
   },
   "bin": {

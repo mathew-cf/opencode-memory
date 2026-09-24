@@ -22,10 +22,21 @@ LLM agents forget everything between sessions. That means rediscovering the same
 
 ### OpenCode
 
-The package root is the OpenCode v1 plugin. For OpenCode v2, load the separate
-`@mathew-cf/opencode-memory/v2` entry. Both use the same tool definitions and
-search v1 and v2 OpenCode session history. The v1 entry adapts the tools and
+The package root is the OpenCode v1 plugin. OpenCode v2 loads the package's
+`./server` export, which provides the v2 plugin. Both use the same tool definitions
+and search v1 and v2 OpenCode session history. The v1 entry adapts the tools and
 registers its hooks and config through the v1 plugin API.
+
+OpenCode v2:
+
+```jsonc
+// opencode.jsonc
+{
+  "plugins": ["@mathew-cf/opencode-memory"]
+}
+```
+
+OpenCode v1:
 
 ```jsonc
 // opencode.jsonc
