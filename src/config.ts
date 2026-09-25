@@ -30,7 +30,7 @@ export function buildMemoryPromptAppendix(memoryDir = `~/${DEFAULT_MEMORY_SUBDIR
 1. **Search once per unfamiliar durable topic:** call \`memory_search\` and \`session_search\` before substantial work when current context does not already contain relevant evidence. Use \`memory_read\` for bounded follow-up. Reuse loaded results for follow-up requests; do not repeat the bootstrap ritual merely because the user sent another message.
 2. **Search again when the topic materially changes, after compaction, or when stuck:** use previous sessions to inform the approach before guessing. Skip a corpus when current session state already records that its search found nothing relevant for this topic.
 3. **When you discover something reusable:** write to ${memoryRoot}/{category}/{filename}.md and \`memory_save\` immediately. Never defer, never ask.
-4. **For reference sources:** use \`knowledge_list\` to discover configured knowledge bases, then \`knowledge_search\` and \`knowledge_read\` for source-backed information. Keep knowledge-base search separate from saved memories.
+4. **For reference sources:** use \`knowledge_list\` to discover configured knowledge bases, then \`knowledge_base_search\` and \`knowledge_base_read\` for source-backed information. Keep knowledge-base search separate from saved memories.
 
 If you can't write to memory, end your response with:
 ## Discoveries worth saving
@@ -81,8 +81,8 @@ export const EXPLORE_PERMISSIONS: Record<string, string> = {
   memory_read: "allow",
   memory_list: "allow",
   memory_access: "allow",
-  knowledge_search: "allow",
-  knowledge_read: "allow",
+  knowledge_base_search: "allow",
+  knowledge_base_read: "allow",
   knowledge_list: "allow",
   session_search: "allow",
   session_search_all: "allow",

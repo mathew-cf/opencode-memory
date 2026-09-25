@@ -31,7 +31,10 @@ test("v2 entry registers tools, skill, prompt, permissions and guard hooks", asy
 
     await plugin.setup(context as any);
     expect(tools.size).toBe(13);
-    expect(tools.get("knowledge_search").input.safeParse({ query: "test" }).success).toBe(true);
+    expect(tools.get("knowledge_base_search").input.safeParse({ query: "test" }).success).toBe(true);
+    expect(tools.has("knowledge_base_read")).toBe(true);
+    expect(tools.has("knowledge_search")).toBe(false);
+    expect(tools.has("knowledge_read")).toBe(false);
     expect(tools.get("memory_list").input.safeParse({}).success).toBe(true);
     const result = await tools.get("memory_list").execute({}, { sessionID: "test" });
     expect(result.content).toContain("Memory");

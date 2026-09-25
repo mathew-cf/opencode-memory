@@ -54,7 +54,7 @@ function selectBases(config: KnowledgeConfig, base?: string, all?: boolean): Kno
 }
 
 export const list = defineTool({
-  description: "List configured knowledge bases, their names, and which one is the default. Call before knowledge_search when the available bases are unknown.",
+  description: "List configured knowledge bases, their names, and which one is the default. Call before knowledge_base_search when the available bases are unknown.",
   input: z.object({}),
   async execute() { return { content: await runKnowledgeList() }; },
 });
@@ -76,7 +76,7 @@ export type KnowledgeSearchRunner = (
 ) => Promise<RagCommandResult>;
 
 export const search = defineTool({
-  description: "Search a named knowledge base's indexed sources using its rag.toml search settings. Omit base for the default; set all=true to search every configured base. Use knowledge_read with a result's base, index, and source for full text.",
+  description: "Search a named knowledge base's indexed sources using its rag.toml search settings. Omit base for the default; set all=true to search every configured base. Use knowledge_base_read with a result's base, index, and source for full text.",
   input: z.object({
     query: z.string().describe("Search query"),
     base: z.string().optional().describe("Knowledge base name; omit for the default"),
@@ -119,7 +119,7 @@ export async function runKnowledgeSearch(
         }
         sections.push(`## ${base.name}\n` + hits.map((hit, index) => {
           const snippet = hit.text.replace(/\s+/g, " ").trim().slice(0, 300);
-          return `${index + 1}. ${hit.index_name}/${hit.source} (score ${hit.score.toFixed(3)})\n   ${snippet}\n   knowledge_read(base="${base.name}", index="${hit.index_name}", source="${hit.source}")`;
+          return `${index + 1}. ${hit.index_name}/${hit.source} (score ${hit.score.toFixed(3)})\n   ${snippet}\n   knowledge_base_read(base="${base.name}", index="${hit.index_name}", source="${hit.source}")`;
         }).join("\n"));
       } catch (error) {
         sections.push(`## ${base.name}\nSearch failed: ${String(error)}`);
@@ -163,11 +163,11 @@ async function indexedSource(base: KnowledgeBase, indexName: string, source: str
 }
 
 export const read = defineTool({
-  description: "Read a bounded section of a knowledge search result from its source file. Pass the base, index, and source exactly as returned by knowledge_search.",
+  description: "Read a bounded section of a knowledge search result from its source file. Pass the base, index, and source exactly as returned by knowledge_base_search.",
   input: z.object({
     base: z.string().optional().describe("Knowledge base name; omit for the default"),
-    index: z.string().describe("Index name returned by knowledge_search"),
-    source: z.string().describe("Source path returned by knowledge_search, relative to its index root"),
+    index: z.string().describe("Index name returned by knowledge_base_search"),
+    source: z.string().describe("Source path returned by knowledge_base_search, relative to its index root"),
     offset: z.number().optional().describe("Character offset for continuation (default 0)"),
     max_chars: z.number().optional().describe("Maximum characters (default 4000, maximum 16000)"),
   }),

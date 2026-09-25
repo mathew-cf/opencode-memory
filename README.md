@@ -13,7 +13,7 @@ LLM agents forget everything between sessions. That means rediscovering the same
 | Category           | Additions                                                                 |
 | ------------------ | ------------------------------------------------------------------------- |
 | **Memory tools**   | `memory_search`, `memory_read`, `memory_list`, `memory_save`, `memory_access`, `memory_setup` |
-| **Knowledge tools** | `knowledge_list`, `knowledge_search`, `knowledge_read` for separately indexed source repositories |
+| **Knowledge tools** | `knowledge_list`, `knowledge_base_search`, `knowledge_base_read` for separately indexed source repositories |
 | **Session tools**  | `session_search_all` across OpenCode, Pi, and Codex; `session_search`, `session_read`, and `session_list` for OpenCode history |
 | **Hooks**          | Search-first nudge at 8 tool calls; discovery nudge on subagent outputs; retrospective reminder at compaction time (OpenCode only) |
 | **Skill**          | `opencode-memory` — auto-registered in OpenCode, dropped at `~/.agents/skills/opencode-memory` for Zed & Pi |
@@ -163,7 +163,7 @@ path = "~/projects/my-project/knowledge"
 
 Each directory must contain `rag.toml` (or `.rag.toml`) with one or more
 `[[index]]` source entries. Index those sources with `rag index --config
-<knowledge-base>/rag.toml`; `knowledge_search` uses `rag search --config` and
+<knowledge-base>/rag.toml`; `knowledge_base_search` uses `rag search --config` and
 honors that file's `[search]` settings, including `hybrid = true`. The plugin
 does not build knowledge-base indexes or write to source repositories.
 
@@ -174,14 +174,14 @@ directory. Set `OPENCODE_MEMORY_CONFIG` to use another config file.
 
 ```
 knowledge_list()                                      # names and default
-knowledge_search(query="cache retries")              # default base
-knowledge_search(query="cache retries", base="project")
-knowledge_search(query="cache retries", all=true)    # results grouped by base
-knowledge_read(base="reference", index="docs", source="guide.md")
+knowledge_base_search(query="cache retries")              # default base
+knowledge_base_search(query="cache retries", base="project")
+knowledge_base_search(query="cache retries", all=true)    # results grouped by base
+knowledge_base_read(base="reference", index="docs", source="guide.md")
 ```
 
 Search results carry the base name, index name, and source path. Pass those
-fields to `knowledge_read`; it reads a bounded portion of the original file
+fields to `knowledge_base_read`; it reads a bounded portion of the original file
 under that index's configured source directory, even when the source repo is
 outside the knowledge-base directory.
 

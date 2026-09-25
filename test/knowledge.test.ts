@@ -61,17 +61,17 @@ test("search selects one base or all and preserves base and index identities", a
     const defaultResult = await runKnowledgeSearch({ query: "cache" }, runner, "rag");
     expect(calls).toEqual([join(root, "reference", "rag.toml")]);
     expect(defaultResult).toContain("## reference");
-    expect(defaultResult).toContain('knowledge_read(base="reference", index="docs", source="same.md")');
+    expect(defaultResult).toContain('knowledge_base_read(base="reference", index="docs", source="same.md")');
     calls.length = 0;
     const allResult = await runKnowledgeSearch({ query: "cache", all: true }, runner, "rag");
     expect(calls).toHaveLength(2);
     expect(allResult).toContain("## reference");
     expect(allResult).toContain("## project");
-    expect(allResult).toContain('knowledge_read(base="project", index="docs", source="same.md")');
+    expect(allResult).toContain('knowledge_base_read(base="project", index="docs", source="same.md")');
   });
 });
 
-test("knowledge_read uses the selected index root outside the knowledge-base directory", async () => {
+test("knowledge_base_read uses the selected index root outside the knowledge-base directory", async () => {
   await withKnowledgeConfig('[[knowledge_base]]\nname = "reference"\npath = "./reference"\n', async (root) => {
     await mkdir(join(root, "reference"));
     await mkdir(join(root, "repo"));

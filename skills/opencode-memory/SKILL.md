@@ -20,8 +20,8 @@ The goal isn't to save everything — it's to save what took >1 minute to figure
 | `memory_access(path)`             | Mark a file as read & useful (bumps ranking) |
 | `memory_setup()`                  | Check `rag` install status, print guidance |
 | `knowledge_list()`                | List configured read-only knowledge bases and their default |
-| `knowledge_search(query, base?, all?)` | Search source repositories in one or all knowledge bases |
-| `knowledge_read(base?, index, source, offset?, max_chars?)` | Read a bounded portion of a search result's original file |
+| `knowledge_base_search(query, base?, all?)` | Search source repositories in one or all knowledge bases |
+| `knowledge_base_read(base?, index, source, offset?, max_chars?)` | Read a bounded portion of a search result's original file |
 | `session_search(query, limit?, directory?)` | Search OpenCode session history |
 | `session_search_all(query, limit?, directory?)` | Concurrently search OpenCode, Pi, and Codex; unavailable harnesses are non-fatal |
 | `session_read(session_id, ...)`   | Read one OpenCode session |
@@ -29,7 +29,7 @@ The goal isn't to save everything — it's to save what took >1 minute to figure
 
 Read search results with `memory_read`; use `heading` to retrieve only a relevant section. The legacy `memory_access` remains available when a memory was read through another surface.
 
-Knowledge bases are separate from memory. Use `knowledge_search` for reference source material and `knowledge_read` for a result's full context. Call `knowledge_list` when the available base names are unknown. Knowledge tools never save memories or modify source files.
+Knowledge bases are separate from memory. Use `knowledge_base_search` for reference source material and `knowledge_base_read` for a result's full context. Call `knowledge_list` when the available base names are unknown. Knowledge tools never save memories or modify source files.
 
 ---
 
