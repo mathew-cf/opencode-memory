@@ -43,7 +43,7 @@ import { dirname, resolve as resolvePath } from "node:path";
 import { fileURLToPath } from "node:url";
 import { CATEGORIES, DEFAULT_MEMORY_SUBDIR } from "./constants";
 import { resolveMemoryDir } from "./lib/paths";
-import { downloadModel, keywordAvailable, resolveRagBinary } from "./lib/rag";
+import { downloadModel, keywordAvailable, memoryRagConfigPath, resolveRagBinary } from "./lib/rag";
 import { runSetup } from "./tools/memory";
 
 interface InitOptions {
@@ -238,6 +238,17 @@ export async function initMemory(
     if (!existsSync(gitkeep)) {
       await writeFile(gitkeep, "");
     }
+  }
+  // Keep this store self-contained. The named index lets rag-cli apply the
+  // same file selection rules to indexing and live keyword search.
+  const ragConfig = `${memoryDir}/rag.toml`;
+  if (!memoryRagConfigPath(memoryDir)) {
+    await writeFile(ragConfig, '[[index]]\nname = "memory"\npath = "."\noutput = ".rag"\nexclude = ["rag.toml", ".rag.toml"]\n');
+    note("✓ created rag.toml for the memory corpus");
+  }
+  const gitignore = `${memoryDir}/.gitignore`;
+  if (!existsSync(gitignore)) {
+    await writeFile(gitignore, ".rag/\n");
   }
   if (result.createdCategories.length > 0) {
     note(`✓ created category dirs: ${result.createdCategories.join(", ")}`);

@@ -53,9 +53,36 @@ describe("runRagKeywordFiles", () => {
     expect(noMatches).toEqual([]);
     expect(failed).toBeUndefined();
   });
+
+  test("uses the memory entry and its file rules when a config exists", async () => {
+    let command: string[] = [];
+    await runRagKeywordFiles("rag", {
+      root: "/memory", configPath: "/memory/rag.toml", patterns: ["cache"], globs: ["*.md"],
+    }, async (argv) => {
+      command = argv;
+      return { exitCode: 1, stdout: "", stderr: "" };
+    });
+    expect(command).toEqual([
+      "rag", "keyword", "--files-with-matches", "--ignore-case", "--glob", "*.md",
+      "-e", "cache", "--config", "/memory/rag.toml", "--only", "memory",
+    ]);
+  });
 });
 
 describe("runRagSearch", () => {
+  test("uses only memory and disables rag-cli hybrid ranking", async () => {
+    let command: string[] = [];
+    await runRagSearch("rag", {
+      query: "cache", indexDir: "/memory/.rag", configPath: "/memory/rag.toml",
+    }, async (argv) => {
+      command = argv;
+      return { exitCode: 0, stdout: "[]", stderr: "" };
+    });
+    expect(command).toEqual([
+      "rag", "search", "cache", "--config", "/memory/rag.toml", "--only", "memory",
+      "--no-hybrid", "-k", "15", "--json", "--group-by-source",
+    ]);
+  });
   test("requests one result per source from current rag-cli versions", async () => {
     const calls: string[][] = [];
     const output = await runRagSearch(

@@ -86,7 +86,21 @@ rag download
 bunx @mathew-cf/opencode-memory init
 ```
 
-Creates `~/opencode-memory/` (or `$OPENCODE_MEMORY_DIR`), runs `git init`, scaffolds the 7 advisory category subdirs (`preferences/`, `repos/`, `technical/`, `people/`, `workflows/`, `snippets/`, `notes/`), and pre-caches the embedding model for semantic search.
+Creates `~/opencode-memory/` (or `$OPENCODE_MEMORY_DIR`), runs `git init`, scaffolds the 7 advisory category subdirs (`preferences/`, `repos/`, `technical/`, `people/`, `workflows/`, `snippets/`, `notes/`), writes a `rag.toml` for the `memory` index, and pre-caches the embedding model for semantic search. Existing `rag.toml` files are preserved.
+
+The generated config is:
+
+```toml
+[[index]]
+name = "memory"
+path = "."
+output = ".rag"
+exclude = ["rag.toml", ".rag.toml"]
+```
+
+`memory_search` uses this entry for live keyword file selection and semantic search; `memory_save` rebuilds only this entry. Add `exclude`, `include`, `no_ignore`, or `hidden` to control file selection, following rag-cli's `rag.toml` rules. Keep the entry named `memory`. Other entries, if present, do not enter memory search. The plugin combines keyword and semantic results with its own frontmatter-aware ranking, so `[search] hybrid` is overridden for its semantic call. For direct CLI search, rag-cli's own `[search]` settings still apply. Stores without `rag.toml` retain path-based search and indexing.
+
+If an existing `.rag` index predates rag-cli 2.0, rebuild it once with `rag index --config ~/opencode-memory/rag.toml --only memory` (adjust the path when using `$OPENCODE_MEMORY_DIR`).
 
 Subcommands:
 

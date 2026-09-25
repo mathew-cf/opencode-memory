@@ -16,6 +16,8 @@
  */
 
 import { createRequire } from "node:module";
+import { existsSync } from "node:fs";
+import { join } from "node:path";
 
 // ESM → CommonJS bridge. `import.meta.url` works both in the source tree
 // and in the bundled dist/index.js output (bun build preserves it).
@@ -54,6 +56,7 @@ export function resolveRagBinary(
 
 export interface KeywordFilesRequest {
   root: string;
+  configPath?: string;
   patterns: string[];
   globs: string[];
   fixedStrings?: boolean;
@@ -69,7 +72,8 @@ export async function runRagKeywordFiles(
   if (request.fixedStrings) args.push("--fixed-strings");
   for (const glob of request.globs) args.push("--glob", glob);
   for (const pattern of request.patterns) args.push("-e", pattern);
-  args.push(request.root);
+  if (request.configPath) args.push("--config", request.configPath, "--only", "memory");
+  else args.push(request.root);
   const result = await runner(args);
   if (result.exitCode === 1) return [];
   if (result.exitCode !== 0) return undefined;
@@ -146,6 +150,15 @@ export interface RagCommandResult {
 
 export type RagCommandRunner = (argv: string[]) => Promise<RagCommandResult>;
 
+/** Use the memory store's config when present; older stores retain path-based commands. */
+export function memoryRagConfigPath(memoryDir: string): string | undefined {
+  for (const name of ["rag.toml", ".rag.toml"]) {
+    const path = join(memoryDir, name);
+    if (existsSync(path)) return path;
+  }
+  return undefined;
+}
+
 /** Rust's home-directory lookup needs HOME even on Windows. */
 export function ragProcessEnv(env: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
   const home = env.HOME || env.USERPROFILE;
@@ -176,15 +189,16 @@ function groupBySourceUnsupported(stderr: string): boolean {
  */
 export async function runRagSearch(
   binary: string,
-  args: { query: string; indexDir: string; topK?: number },
+  args: { query: string; indexDir: string; configPath?: string; topK?: number },
   runner: RagCommandRunner = runRagCommand,
 ): Promise<string> {
   const base = [
     binary,
     "search",
     args.query,
-    "-i",
-    args.indexDir,
+    ...(args.configPath
+      ? ["--config", args.configPath, "--only", "memory", "--no-hybrid"]
+      : ["-i", args.indexDir]),
     "-k",
     String(args.topK ?? 15),
     "--json",
@@ -205,6 +219,7 @@ export async function runRagSearch(
 export async function ragSearch(args: {
   query: string;
   indexDir: string;
+  configPath?: string;
   topK?: number;
 }): Promise<string> {
   const binary = resolveRagBinary();
@@ -223,11 +238,14 @@ export async function ragSearch(args: {
 export function spawnRagIndex(args: {
   memoryDir: string;
   indexDir: string;
+  configPath?: string;
 }): boolean {
   const binary = resolveRagBinary();
   if (!binary) return false;
   try {
-    Bun.spawn([binary, "index", args.memoryDir, "-o", args.indexDir], {
+    Bun.spawn(args.configPath
+      ? [binary, "index", "--config", args.configPath, "--only", "memory"]
+      : [binary, "index", args.memoryDir, "-o", args.indexDir], {
       stdout: "ignore",
       stderr: "ignore",
       env: ragProcessEnv(),

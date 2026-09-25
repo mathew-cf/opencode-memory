@@ -22,7 +22,7 @@ import {
   resolveContainedPath,
   resolveMemoryDir,
 } from "../lib/paths";
-import { installGuidance, ragAvailable, ragKeywordFiles, ragSearch, resolveRagBinary, spawnRagIndex, keywordAvailable } from "../lib/rag";
+import { installGuidance, ragAvailable, ragKeywordFiles, ragSearch, resolveRagBinary, spawnRagIndex, keywordAvailable, memoryRagConfigPath } from "../lib/rag";
 import { countTermMatches, parseSearchTerms, scoreCandidate } from "../lib/search-terms";
 
 // --- Internal helpers ---------------------------------------------------
@@ -56,9 +56,10 @@ function accessCounts(memoryDir: string): Map<string, number> {
 /**
  * Describe the live Markdown search shared by normal and category fallback.
  */
-export function memoryKeywordRequest(terms: string[], root: string) {
+export function memoryKeywordRequest(terms: string[], root: string, configPath?: string) {
   return {
     root,
+    configPath,
     patterns: terms,
     globs: ["*.md", "!.git", "!.rag", "!**/INDEX.md"],
   };
@@ -212,15 +213,16 @@ export async function runSearch(input: {
   if (category !== undefined && !validCategory(category)) return `Invalid memory category: ${category}`;
   const memoryDir = resolveMemoryDir();
   const indexDir = ragIndexDir(memoryDir);
-  const searchDir = category ? posix.join(memoryDir, category) : memoryDir;
+  const configPath = memoryRagConfigPath(memoryDir);
+  const searchDir = category && !configPath ? posix.join(memoryDir, category) : memoryDir;
   const terms = parseSearchTerms(query);
   const keywordTerms = terms.length > 0 ? terms : [query];
 
   const hasRag = ragAvailable();
 
   const [keywordPaths, ragResultText] = await Promise.all([
-    ragKeywordFiles(memoryKeywordRequest(keywordTerms, searchDir)),
-    hasRag ? ragSearch({ query, indexDir, topK: 15 }) : Promise.resolve(""),
+    ragKeywordFiles(memoryKeywordRequest(keywordTerms, searchDir, configPath)),
+    hasRag ? ragSearch({ query, indexDir, configPath, topK: 15 }) : Promise.resolve(""),
   ]);
 
   const resultMap = new Map<string, { keywordMatch: boolean; ragScore?: number; ragText?: string }>();
@@ -228,7 +230,7 @@ export async function runSearch(input: {
   if (keywordPaths) {
     for (const line of keywordPaths) {
       const rel = toRelPath(memoryDir, line);
-      if (rel.endsWith(".md") && !rel.startsWith(".")) {
+      if (rel.endsWith(".md") && !rel.startsWith(".") && (!category || !configPath || rel.startsWith(category + "/"))) {
         resultMap.set(rel, { keywordMatch: true });
       }
     }
@@ -236,6 +238,8 @@ export async function runSearch(input: {
 
   const ragHits = parseRagHits(ragResultText);
   for (const hit of ragHits) {
+    if (!hit.source.endsWith(".md")) continue;
+    try { resolveContainedPath(memoryDir, hit.source); } catch { continue; }
     if (hit.source.endsWith("INDEX.md")) continue;
     if (category && !hit.source.startsWith(category + "/")) continue;
     const existing = resultMap.get(hit.source) || { keywordMatch: false };
@@ -249,7 +253,9 @@ export async function runSearch(input: {
   let crossCategoryFallback = false;
   if (resultMap.size === 0 && category) {
     crossCategoryFallback = true;
-    const globalPaths = await ragKeywordFiles(memoryKeywordRequest(keywordTerms, memoryDir));
+    const globalPaths = configPath
+      ? keywordPaths
+      : await ragKeywordFiles(memoryKeywordRequest(keywordTerms, memoryDir));
     if (globalPaths) {
       for (const line of globalPaths) {
         const rel = toRelPath(memoryDir, line);
@@ -259,6 +265,8 @@ export async function runSearch(input: {
       }
     }
     for (const hit of ragHits) {
+      if (!hit.source.endsWith(".md")) continue;
+      try { resolveContainedPath(memoryDir, hit.source); } catch { continue; }
       if (hit.source.endsWith("INDEX.md")) continue;
       const existing = resultMap.get(hit.source) || { keywordMatch: false };
       if (!existing.ragScore || hit.score > existing.ragScore) {
@@ -708,6 +716,7 @@ export const save = defineTool({
 export async function runSave(): Promise<string> {
   const memoryDir = resolveMemoryDir();
   const indexDir = ragIndexDir(memoryDir);
+  const configPath = memoryRagConfigPath(memoryDir);
   let changed: string[] = [];
 
   try {
@@ -726,7 +735,7 @@ export async function runSave(): Promise<string> {
     // re-indexing so at least semantic search stays fresh.
   }
 
-  const kickedOffIndex = spawnRagIndex({ memoryDir, indexDir });
+  const kickedOffIndex = spawnRagIndex({ memoryDir, indexDir, configPath });
 
   if (changed.length === 0) {
     return "No changes to sync";

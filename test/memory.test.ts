@@ -179,6 +179,20 @@ describe("runList", () => {
 });
 
 describe("runSearch", () => {
+  test("uses rag.toml file selection for live keyword search", async () => {
+    await withMemoryDir(async (dir) => {
+      await Bun.write(`${dir}/rag.toml`,
+        '[[index]]\nname = "memory"\npath = "."\noutput = ".rag"\nexclude = ["technical/excluded.md"]\n');
+      await writeMemoryFile(dir, "technical/visible.md", { title: "Visible" }, "distinctive needle");
+      await writeMemoryFile(dir, "technical/excluded.md", { title: "Excluded" }, "distinctive needle");
+      const out = await runSearch({ query: "distinctive needle" });
+      expect(out).toContain("technical/visible.md");
+      expect(out).not.toContain("technical/excluded.md");
+      const categoryOut = await runSearch({ query: "distinctive needle", category: "notes" });
+      expect(categoryOut).toContain("technical/visible.md");
+      expect(categoryOut).not.toContain("technical/excluded.md");
+    });
+  });
   test("returns a 'no memories' message when the directory is empty", async () => {
     await withMemoryDir(async () => {
       const out = await runSearch({ query: "alpha" });

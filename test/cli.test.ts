@@ -97,6 +97,9 @@ describe("initMemory", () => {
           expect(existsSync(`${dir}/${cat}/.gitkeep`)).toBe(true);
         }
         expect(existsSync(`${dir}/.git`)).toBe(true);
+        expect(await Bun.file(`${dir}/rag.toml`).text()).toContain('name = "memory"');
+        expect(await Bun.file(`${dir}/rag.toml`).text()).toContain('output = ".rag"');
+        expect(await Bun.file(`${dir}/.gitignore`).text()).toContain(".rag/");
       } finally {
         tmp.cleanup();
       }
@@ -111,9 +114,11 @@ describe("initMemory", () => {
       });
       try {
         await initMemory(dir, options);
+        await Bun.write(`${dir}/rag.toml`, '[[index]]\nname = "memory"\npath = "."\noutput = "custom"\n');
         const second = await initMemory(dir, options);
         expect(second.gitInitialized).toBe(false);
         expect(second.createdCategories).toEqual([]);
+        expect(await Bun.file(`${dir}/rag.toml`).text()).toContain('output = "custom"');
         // Skill install reports "already-installed" on the second run.
         expect(second.skillInstall?.status).toBe("already-installed");
       } finally {
