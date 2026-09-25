@@ -22,7 +22,7 @@ import {
   resolveContainedPath,
   resolveMemoryDir,
 } from "../lib/paths";
-import { installGuidance, ragAvailable, ragKeywordFiles, ragSearch, resolveRagBinary, spawnRagIndex, keywordAvailable, memoryRagConfigPath } from "../lib/rag";
+import { installGuidance, parseRagJsonArray, ragAvailable, ragKeywordFiles, ragSearch, resolveRagBinary, spawnRagIndex, keywordAvailable, memoryRagConfigPath } from "../lib/rag";
 import { countTermMatches, parseSearchTerms, scoreCandidate } from "../lib/search-terms";
 
 // --- Internal helpers ---------------------------------------------------
@@ -71,15 +71,11 @@ export function memoryKeywordRequest(terms: string[], root: string, configPath?:
  */
 export function parseRagHits(ragText: string): Array<{ source: string; score: number; text: string }> {
   if (!ragText) return [];
-  try {
-    const parsed = JSON.parse(ragText);
-    if (!Array.isArray(parsed)) return [];
-    return parsed.filter(
-      (hit) => hit && typeof hit.source === "string" && typeof hit.score === "number" && typeof hit.text === "string",
-    );
-  } catch {
-    return [];
-  }
+  return parseRagJsonArray(ragText).filter((hit): hit is { source: string; score: number; text: string } => {
+    if (!hit || typeof hit !== "object") return false;
+    const row = hit as { source?: unknown; score?: unknown; text?: unknown };
+    return typeof row.source === "string" && typeof row.score === "number" && typeof row.text === "string";
+  });
 }
 
 /**

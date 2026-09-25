@@ -8,6 +8,7 @@ import { createGuardHooks, afterToolUpdate, buildCompactionContext } from "./hoo
 import { normalizeDirPath, resolveMemoryDir } from "./lib/paths";
 import type { ToolDefinition } from "./lib/tool-definition";
 import * as memory from "./tools/memory";
+import * as knowledge from "./tools/knowledge";
 import * as session from "./tools/session";
 
 const definitions: Record<string, ToolDefinition> = {
@@ -17,6 +18,9 @@ const definitions: Record<string, ToolDefinition> = {
   memory_save: memory.save,
   memory_access: memory.access,
   memory_setup: memory.setup,
+  knowledge_search: knowledge.search,
+  knowledge_read: knowledge.read,
+  knowledge_list: knowledge.list,
   session_search: session.search,
   session_search_all: session.searchAll,
   session_read: session.read,
@@ -80,7 +84,7 @@ export default Plugin.define({
       ) {
         event.effect = "allow";
       }
-      if (event.agent === "explore" && /^(memory_(search|read|list|access)|session_(search|search_all|read|list))$/.test(event.action)) {
+      if (event.agent === "explore" && /^(memory_(search|read|list|access)|knowledge_(search|read|list)|session_(search|search_all|read|list))$/.test(event.action)) {
         event.effect = "allow";
       }
     });

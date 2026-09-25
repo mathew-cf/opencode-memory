@@ -1,5 +1,12 @@
 import { describe, expect, test } from "bun:test";
-import { ragProcessEnv, resolveRagBinary, runRagKeywordFiles, runRagSearch, type RagCommandResult } from "../src/lib/rag";
+import { parseRagJsonArray, ragProcessEnv, resolveRagBinary, runRagKeywordFiles, runRagKnowledgeSearch, runRagSearch, type RagCommandResult } from "../src/lib/rag";
+
+test("parses rag JSON when a model library appends stdout diagnostics", () => {
+  expect(parseRagJsonArray('[{"text":"bracket ] and \\\" quote"}]\nCoreML diagnostic')).toEqual([
+    { text: 'bracket ] and " quote' },
+  ]);
+  expect(parseRagJsonArray("[{}" )).toEqual([]);
+});
 
 describe("rag executable", () => {
   test("resolves the Windows native executable instead of the JavaScript shim", () => {
@@ -147,4 +154,16 @@ describe("runRagSearch", () => {
     expect(output).toBe("");
     expect(calls).toHaveLength(1);
   });
+});
+
+test("knowledge search delegates hybrid settings and source selection to its rag.toml", async () => {
+  let command: string[] = [];
+  await runRagKnowledgeSearch("rag", "/kb/rag.toml", "cache retry", 5, async (argv) => {
+    command = argv;
+    return { exitCode: 0, stdout: "[]", stderr: "" };
+  });
+  expect(command).toEqual([
+    "rag", "search", "cache retry", "--config", "/kb/rag.toml",
+    "--group-by-source", "--json", "-k", "5",
+  ]);
 });

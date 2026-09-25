@@ -10,6 +10,9 @@ Conventions for agents working on the `@mathew-cf/opencode-memory` codebase.
 | `bun run typecheck`  | TypeScript check (`tsc --noEmit`)         |
 | `bun run build`      | Bundle to `dist/` + emit `.d.ts`          |
 
+The optional native knowledge-base integration test needs a cached embedding
+model: `OPENCODE_MEMORY_TEST_RAG_INTEGRATION=1 bun test test/knowledge.test.ts`.
+
 Run all three before committing:
 
 ```bash
@@ -27,6 +30,7 @@ src/
   constants.ts          # CATEGORIES, DEFAULT_MEMORY_SUBDIR, STOP_WORDS
   lib/
     paths.ts            # resolveHome, resolveMemoryDir, normPath, ragIndexDir
+    knowledge-config.ts # named knowledge bases from the user's config.toml
     frontmatter.ts      # parseFrontmatter, bumpAccessFields, todayISO
     search-terms.ts     # parseSearchTerms, countTermMatches, scoreCandidate
     rag.ts              # ensureRag, ragSearch, spawnRagIndex, downloadModel
@@ -34,6 +38,7 @@ src/
     tool-definition.ts  # v2-oriented tool definition helper
   tools/
     memory.ts           # search / list / save / access / setup
+    knowledge.ts        # read-only search / read / list over named rag.toml scopes
     session.ts          # search / read / list (reads opencode.db)
   hooks/
     guard.ts            # tool-call tracking, nudges, compaction context
@@ -70,7 +75,7 @@ Both plugins share `src/tools/memory.ts`, `src/tools/session.ts`, and `src/lib/*
 
 Exports a default v1 plugin object. Its `server` function returns:
 
-- **`tool`** — custom tools keyed with the `memory_` / `session_` prefixes so names match what skills and prompts already reference
+- **`tool`** — custom tools keyed with `memory_`, `knowledge_`, and `session_` prefixes. Knowledge bases are read-only and configured separately from the memory corpus.
 - **`config`** — calls `applyConfig()` to register the bundled skill directory, add edit/external_directory permissions for `~/opencode-memory/**`, and prepend the memory-awareness appendix to the built-in subagent prompts
 - **`tool.execute.after`** — `guard.toolAfter`, tracks memory/session tool usage, fires nudges
 - **`experimental.session.compacting`** — `guard.compacting`, injects preserve-through-compaction context

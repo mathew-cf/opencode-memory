@@ -150,6 +150,35 @@ export interface RagCommandResult {
 
 export type RagCommandRunner = (argv: string[]) => Promise<RagCommandResult>;
 
+/** Native model libraries can append diagnostics to stdout after rag's JSON. */
+export function parseRagJsonArray(output: string): unknown[] {
+  const text = output.trimStart();
+  if (!text.startsWith("[")) return [];
+  let depth = 0;
+  let quoted = false;
+  let escaped = false;
+  for (let i = 0; i < text.length; i++) {
+    const char = text[i];
+    if (quoted) {
+      if (escaped) escaped = false;
+      else if (char === "\\") escaped = true;
+      else if (char === '"') quoted = false;
+    } else if (char === '"') {
+      quoted = true;
+    } else if (char === "[") {
+      depth++;
+    } else if (char === "]" && --depth === 0) {
+      try {
+        const parsed: unknown = JSON.parse(text.slice(0, i + 1));
+        return Array.isArray(parsed) ? parsed : [];
+      } catch {
+        return [];
+      }
+    }
+  }
+  return [];
+}
+
 /** Use the memory store's config when present; older stores retain path-based commands. */
 export function memoryRagConfigPath(memoryDir: string): string | undefined {
   for (const name of ["rag.toml", ".rag.toml"]) {
@@ -225,6 +254,20 @@ export async function ragSearch(args: {
   const binary = resolveRagBinary();
   if (!binary) return "";
   return runRagSearch(binary, args).catch(() => "");
+}
+
+/** Search every source in one knowledge base, honoring its rag.toml search settings. */
+export async function runRagKnowledgeSearch(
+  binary: string,
+  configPath: string,
+  query: string,
+  topK: number,
+  runner: RagCommandRunner = runRagCommand,
+): Promise<RagCommandResult> {
+  return runner([
+    binary, "search", query, "--config", configPath,
+    "--group-by-source", "--json", "-k", String(topK),
+  ]);
 }
 
 /**

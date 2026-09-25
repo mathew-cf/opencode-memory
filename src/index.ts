@@ -15,6 +15,7 @@ import { applyConfig } from "./config";
 import { createGuardHooks } from "./hooks/guard";
 import type { ToolDefinition } from "./lib/tool-definition";
 import * as memory from "./tools/memory";
+import * as knowledge from "./tools/knowledge";
 import * as session from "./tools/session";
 
 function adaptTool(definition: ToolDefinition): V1ToolDefinition {
@@ -45,6 +46,13 @@ const sessionTools: AdaptedTools<typeof session, "search" | "searchAll" | "read"
   searchAll: adaptTool(session.searchAll),
   read: adaptTool(session.read),
   list: adaptTool(session.list),
+};
+
+const knowledgeTools: AdaptedTools<typeof knowledge, "search" | "read" | "list"> = {
+  ...knowledge,
+  search: adaptTool(knowledge.search),
+  read: adaptTool(knowledge.read),
+  list: adaptTool(knowledge.list),
 };
 
 /**
@@ -84,6 +92,9 @@ const MemoryPlugin: Plugin = async () => {
     memory_save: memoryTools.save,
     memory_access: memoryTools.access,
     memory_setup: memoryTools.setup,
+    knowledge_search: knowledgeTools.search,
+    knowledge_read: knowledgeTools.read,
+    knowledge_list: knowledgeTools.list,
     session_search: sessionTools.search,
     session_search_all: sessionTools.searchAll,
     session_read: sessionTools.read,
@@ -131,4 +142,4 @@ export {
   matchesToolName,
   type SessionState,
 } from "./hooks/guard";
-export { memoryTools, sessionTools };
+export { memoryTools, knowledgeTools, sessionTools };

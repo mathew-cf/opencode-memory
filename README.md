@@ -2,7 +2,7 @@
 
 Persistent cross-session memory for [OpenCode](https://opencode.ai).
 
-A durable knowledge base rooted at `~/opencode-memory/` — a git-tracked tree of markdown notes — paired with a hybrid keyword + semantic search layer. The OpenCode plugin provides tools, hooks, auto-applied config, and a bundled skill.
+A git-tracked memory store rooted at `~/opencode-memory/`, plus optional read-only search over named knowledge bases. The OpenCode plugin provides tools, hooks, auto-applied config, and a bundled skill.
 
 ## Why
 
@@ -13,6 +13,7 @@ LLM agents forget everything between sessions. That means rediscovering the same
 | Category           | Additions                                                                 |
 | ------------------ | ------------------------------------------------------------------------- |
 | **Memory tools**   | `memory_search`, `memory_read`, `memory_list`, `memory_save`, `memory_access`, `memory_setup` |
+| **Knowledge tools** | `knowledge_list`, `knowledge_search`, `knowledge_read` for separately indexed source repositories |
 | **Session tools**  | `session_search_all` across OpenCode, Pi, and Codex; `session_search`, `session_read`, and `session_list` for OpenCode history |
 | **Hooks**          | Search-first nudge at 8 tool calls; discovery nudge on subagent outputs; retrospective reminder at compaction time (OpenCode only) |
 | **Skill**          | `opencode-memory` — auto-registered in OpenCode, dropped at `~/.agents/skills/opencode-memory` for Zed & Pi |
@@ -143,6 +144,46 @@ memory_read("repos/example.md", heading="Build") # retrieve one heading section
 memory_list()                              # browse categories + counts
 memory_list("technical")                   # list files in one category
 ```
+
+### Knowledge bases
+
+Knowledge bases are separate from the writable memory store. Configure their
+names and directories in `~/.config/opencode-memory/config.toml`:
+
+```toml
+[[knowledge_base]]
+name = "reference"
+path = "~/opencode-knowledge-base"
+default = true
+
+[[knowledge_base]]
+name = "project"
+path = "~/projects/my-project/knowledge"
+```
+
+Each directory must contain `rag.toml` (or `.rag.toml`) with one or more
+`[[index]]` source entries. Index those sources with `rag index --config
+<knowledge-base>/rag.toml`; `knowledge_search` uses `rag search --config` and
+honors that file's `[search]` settings, including `hybrid = true`. The plugin
+does not build knowledge-base indexes or write to source repositories.
+
+Names must be unique. With one configured base it becomes the default
+automatically. With several, mark one `default = true` or pass `base` on each
+call. Relative directory paths in this config resolve from the config file's
+directory. Set `OPENCODE_MEMORY_CONFIG` to use another config file.
+
+```
+knowledge_list()                                      # names and default
+knowledge_search(query="cache retries")              # default base
+knowledge_search(query="cache retries", base="project")
+knowledge_search(query="cache retries", all=true)    # results grouped by base
+knowledge_read(base="reference", index="docs", source="guide.md")
+```
+
+Search results carry the base name, index name, and source path. Pass those
+fields to `knowledge_read`; it reads a bounded portion of the original file
+under that index's configured source directory, even when the source repo is
+outside the knowledge-base directory.
 
 ### Reading session history
 
