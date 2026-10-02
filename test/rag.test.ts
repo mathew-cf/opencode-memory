@@ -158,7 +158,7 @@ describe("runRagSearch", () => {
 
 test("knowledge search delegates hybrid settings and source selection to its rag.toml", async () => {
   let command: string[] = [];
-  await runRagKnowledgeSearch("rag", "/kb/rag.toml", "cache retry", 5, async (argv) => {
+  await runRagKnowledgeSearch("rag", "/kb/rag.toml", "cache retry", 5, undefined, async (argv) => {
     command = argv;
     return { exitCode: 0, stdout: "[]", stderr: "" };
   });
@@ -166,4 +166,10 @@ test("knowledge search delegates hybrid settings and source selection to its rag
     "rag", "search", "cache retry", "--config", "/kb/rag.toml",
     "--group-by-source", "--json", "-k", "5",
   ]);
+  await runRagKnowledgeSearch("rag", "/kb/rag.toml", "cache retry", 5, "docs", async (argv) => {
+    command = argv;
+    return { exitCode: 0, stdout: "[]", stderr: "" };
+  });
+  expect(command).toContain("--only");
+  expect(command[command.indexOf("--only") + 1]).toBe("docs");
 });

@@ -174,16 +174,23 @@ directory. Set `OPENCODE_MEMORY_CONFIG` to use another config file.
 
 ```
 knowledge_list()                                      # names and default
+knowledge_list(base="reference")                      # indexes in one base
 knowledge_base_search(query="cache retries")              # default base
 knowledge_base_search(query="cache retries", base="project")
+knowledge_base_search(query="cache retries", base="reference", index="docs")
 knowledge_base_search(query="cache retries", all=true)    # results grouped by base
-knowledge_base_read(base="reference", index="docs", source="guide.md")
+knowledge_base_read(base="reference", index="docs", source="guide.md", byte_offset=120)
 ```
 
-Search results carry the base name, index name, and source path. Pass those
-fields to `knowledge_base_read`; it reads a bounded portion of the original file
-under that index's configured source directory, even when the source repo is
-outside the knowledge-base directory.
+Search results carry the base name, index name, source path, and matching
+passage's byte offset. Pass those fields to `knowledge_base_read` to start near
+the match; its `offset` parameter remains a character-based continuation cursor
+and cannot be combined with `byte_offset`. Reads use the original source file
+under that index's configured directory, even when the source repo is outside
+the knowledge-base directory. Treat search hits as candidates and inspect the
+source: nearest-neighbor search can return unrelated results for a weak query.
+If a source changes after indexing, rebuild its index before using a returned
+byte offset.
 
 ### Reading session history
 

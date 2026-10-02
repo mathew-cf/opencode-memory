@@ -31,6 +31,8 @@ test("a single named knowledge base becomes the default", async () => {
     expect(config.defaultName).toBe("reference");
     expect(config.bases[0].path).toBe(join(root, "reference"));
     expect(await runKnowledgeList()).toContain("reference (default)");
+    expect(await runKnowledgeList({ base: "reference" })).toContain("Indexes: docs");
+    expect(await runKnowledgeList({ base: "missing" })).toContain("Unknown knowledge base: missing");
   });
 });
 
@@ -71,6 +73,30 @@ test("search selects one base or all and preserves base and index identities", a
   });
 });
 
+test("search limits a base to one configured index and preserves the hit location", async () => {
+  await withKnowledgeConfig('[[knowledge_base]]\nname = "reference"\npath = "./reference"\n', async (root) => {
+    await mkdir(join(root, "reference"));
+    await writeFile(join(root, "reference", "rag.toml"),
+      '[[index]]\nname = "docs"\npath = "."\n[[index]]\nname = "api"\npath = "."\n');
+    expect(await runKnowledgeList({ base: "reference" })).toContain("Indexes: docs, api");
+    const selected: Array<string | undefined> = [];
+    const runner = async (_binary: string, _config: string, _query: string, _limit: number, index?: string) => {
+      selected.push(index);
+      return { exitCode: 0, stderr: "", stdout: JSON.stringify([
+        { index_name: "api", source: "reference.md", score: 0.9, text: "matched passage", byte_offset: 12 },
+      ]) };
+    };
+    const result = await runKnowledgeSearch({ query: "endpoint", index: "api" }, runner, "rag");
+    expect(selected).toEqual(["api"]);
+    expect(result).toContain('knowledge_base_read(base="reference", index="api", source="reference.md", byte_offset=12)');
+    expect(await runKnowledgeSearch({ query: "endpoint", index: "missing" }, runner, "rag"))
+      .toContain("Unknown index missing. Available: docs, api");
+    expect(selected).toEqual(["api"]);
+    expect(await runKnowledgeSearch({ query: "endpoint", index: "api", all: true }, runner, "rag"))
+      .toContain("Use either index or all");
+  });
+});
+
 test("knowledge_base_read uses the selected index root outside the knowledge-base directory", async () => {
   await withKnowledgeConfig('[[knowledge_base]]\nname = "reference"\npath = "./reference"\n', async (root) => {
     await mkdir(join(root, "reference"));
@@ -89,6 +115,15 @@ test("knowledge_base_read uses the selected index root outside the knowledge-bas
     expect(result).toContain("Continue with offset=8");
     const continuation = await runKnowledgeRead({ index: "docs", source: "note.md", offset: 8 });
     expect(continuation).toContain("eta gamma");
+    const matched = await runKnowledgeRead({ index: "docs", source: "note.md", byte_offset: 11, max_chars: 4 });
+    expect(matched).toContain("beta\n\n[Continue with offset=12]");
+    expect(await runKnowledgeRead({ index: "docs", source: "note.md", offset: 12 })).toContain(" gamma");
+    expect(await runKnowledgeRead({ index: "docs", source: "note.md", byte_offset: 7 }))
+      .toContain("Could not read knowledge source");
+    expect(await runKnowledgeRead({ index: "docs", source: "note.md", byte_offset: 100 }))
+      .toContain("byte_offset exceeds source length");
+    expect(await runKnowledgeRead({ index: "docs", source: "note.md", byte_offset: 11, offset: 8 }))
+      .toContain("Use either offset or byte_offset");
     expect(await runKnowledgeRead({ index: "docs", source: "../outside.md" })).toContain("Could not read knowledge source");
     expect(await runKnowledgeRead({ index: "docs", source: ".env" })).toContain("Source is not indexed");
     if (process.platform !== "win32") {
@@ -115,14 +150,20 @@ modelIntegrationTest("indexes, searches, and reads a real knowledge source", asy
     if (!binary) throw new Error("rag binary is unavailable");
     await mkdir(join(root, "base"));
     await mkdir(join(root, "repo"));
+    await mkdir(join(root, "other"));
     await writeFile(join(root, "base", "rag.toml"),
-      '[[index]]\nname = "docs"\npath = "../repo"\n');
+      '[[index]]\nname = "docs"\npath = "../repo"\n' +
+      '[[index]]\nname = "other"\npath = "../other"\n');
     await writeFile(join(root, "repo", "guide.md"), "# Retry policy\nUse jitter to avoid retry storms.\n");
+    await writeFile(join(root, "other", "note.md"), "# Other retry policy\nAvoid retry storms.\n");
     const indexed = Bun.spawnSync([binary, "index", "--config", join(root, "base", "rag.toml")]);
     expect(indexed.exitCode).toBe(0);
-    const found = await runKnowledgeSearch({ query: "retry storms" });
+    const found = await runKnowledgeSearch({ query: "retry storms", index: "docs" });
     expect(found).toContain("docs/guide.md");
-    const read = await runKnowledgeRead({ index: "docs", source: "guide.md" });
+    expect(found).not.toContain("other/note.md");
+    const match = found.match(/byte_offset=(\d+)/);
+    expect(match).not.toBeNull();
+    const read = await runKnowledgeRead({ index: "docs", source: "guide.md", byte_offset: Number(match![1]) });
     expect(read).toContain("Use jitter to avoid retry storms.");
   });
 });

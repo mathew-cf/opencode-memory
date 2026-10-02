@@ -262,10 +262,12 @@ export async function runRagKnowledgeSearch(
   configPath: string,
   query: string,
   topK: number,
+  index?: string,
   runner: RagCommandRunner = runRagCommand,
 ): Promise<RagCommandResult> {
   return runner([
     binary, "search", query, "--config", configPath,
+    ...(index ? ["--only", index] : []),
     "--group-by-source", "--json", "-k", String(topK),
   ]);
 }

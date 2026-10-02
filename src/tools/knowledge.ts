@@ -16,6 +16,7 @@ export interface KnowledgeHit {
   source: string;
   score: number;
   text: string;
+  byte_offset?: number;
 }
 
 export function parseKnowledgeHits(text: string): KnowledgeHit[] {
@@ -36,6 +37,16 @@ export function ragConfigForBase(base: KnowledgeBase): string | undefined {
   return undefined;
 }
 
+async function configuredIndexNames(ragConfig: string): Promise<string[]> {
+  const parsed = Bun.TOML.parse(await readFile(ragConfig, "utf8")) as Record<string, unknown>;
+  if (!Array.isArray(parsed.index)) return [];
+  return parsed.index.flatMap((entry: unknown) => {
+    if (!entry || typeof entry !== "object") return [];
+    const name = (entry as Record<string, unknown>).name;
+    return typeof name === "string" ? [name] : [];
+  });
+}
+
 function selectBases(config: KnowledgeConfig, base?: string, all?: boolean): KnowledgeBase[] {
   if (base && all) throw new Error("Use either base or all, not both");
   if (config.bases.length === 0) {
@@ -54,32 +65,40 @@ function selectBases(config: KnowledgeConfig, base?: string, all?: boolean): Kno
 }
 
 export const list = defineTool({
-  description: "List configured knowledge bases, their names, and which one is the default. Call before knowledge_base_search when the available bases are unknown.",
-  input: z.object({}),
-  async execute() { return { content: await runKnowledgeList() }; },
+  description: "List configured knowledge bases and the default. Pass base to list that base's index names before a scoped knowledge_base_search.",
+  input: z.object({
+    base: z.string().optional().describe("Knowledge base name; list its indexes when provided"),
+  }),
+  async execute(input) { return { content: await runKnowledgeList(input) }; },
 });
 
-export async function runKnowledgeList(): Promise<string> {
+export async function runKnowledgeList(input: { base?: string } = {}): Promise<string> {
   try {
     const config = await loadKnowledgeConfig();
     if (!config.bases.length) return `No knowledge bases configured. Add [[knowledge_base]] entries to ${config.configPath}`;
-    return config.bases.map((base) =>
-      `${base.name}${base.name === config.defaultName ? " (default)" : ""}: ${base.path}${ragConfigForBase(base) ? "" : " (rag.toml missing)"}`,
-    ).join("\n");
+    const summary = (base: KnowledgeBase) =>
+      `${base.name}${base.name === config.defaultName ? " (default)" : ""}: ${base.path}${ragConfigForBase(base) ? "" : " (rag.toml missing)"}`;
+    if (!input.base) return config.bases.map(summary).join("\n");
+    const base = selectBases(config, input.base)[0];
+    const ragConfig = ragConfigForBase(base);
+    if (!ragConfig) return summary(base);
+    const indexes = await configuredIndexNames(ragConfig);
+    return `${summary(base)}\nIndexes: ${indexes.length ? indexes.join(", ") : "(none)"}`;
   } catch (error) {
     return `Knowledge config error: ${String(error)}`;
   }
 }
 
 export type KnowledgeSearchRunner = (
-  binary: string, configPath: string, query: string, topK: number,
+  binary: string, configPath: string, query: string, topK: number, index?: string,
 ) => Promise<RagCommandResult>;
 
 export const search = defineTool({
-  description: "Search a named knowledge base's indexed sources using its rag.toml search settings. Omit base for the default; set all=true to search every configured base. Use knowledge_base_read with a result's base, index, and source for full text.",
+  description: "Search indexed reference sources. Omit base for the default, pass index to search one index within that base, or set all=true for every base. Use knowledge_list(base) to discover index names and knowledge_base_read to inspect promising hits. Results are candidates, not proof of relevance.",
   input: z.object({
     query: z.string().describe("Search query"),
     base: z.string().optional().describe("Knowledge base name; omit for the default"),
+    index: z.string().optional().describe("Index name within the selected base; discover with knowledge_list(base)"),
     all: z.boolean().optional().describe("Search every configured knowledge base"),
     limit: z.number().optional().describe("Results per knowledge base (default 5, maximum 20)"),
   }),
@@ -87,11 +106,13 @@ export const search = defineTool({
 });
 
 export async function runKnowledgeSearch(
-  input: { query: string; base?: string; all?: boolean; limit?: number },
+  input: { query: string; base?: string; index?: string; all?: boolean; limit?: number },
   runner: KnowledgeSearchRunner = runRagKnowledgeSearch,
   binary: string | null = resolveRagBinary(),
 ): Promise<string> {
   if (!input.query.trim()) return "Provide a knowledge search query.";
+  if (input.index !== undefined && !input.index.trim()) return "Provide a nonempty index name.";
+  if (input.index && input.all) return "Use either index or all, not both.";
   if (!binary) return installGuidance();
   try {
     const config = await loadKnowledgeConfig();
@@ -107,7 +128,14 @@ export async function runKnowledgeSearch(
         continue;
       }
       try {
-        const result = await runner(binary, ragConfig, input.query, limit);
+        if (input.index) {
+          const indexes = await configuredIndexNames(ragConfig);
+          if (!indexes.includes(input.index)) {
+            sections.push(`## ${base.name}\nUnknown index ${input.index}. Available: ${indexes.join(", ") || "(none)"}`);
+            continue;
+          }
+        }
+        const result = await runner(binary, ragConfig, input.query, limit, input.index);
         if (result.exitCode !== 0) {
           sections.push(`## ${base.name}\nSearch failed: ${result.stderr.trim() || `exit code ${result.exitCode}`}`);
           continue;
@@ -119,7 +147,9 @@ export async function runKnowledgeSearch(
         }
         sections.push(`## ${base.name}\n` + hits.map((hit, index) => {
           const snippet = hit.text.replace(/\s+/g, " ").trim().slice(0, 300);
-          return `${index + 1}. ${hit.index_name}/${hit.source} (score ${hit.score.toFixed(3)})\n   ${snippet}\n   knowledge_base_read(base="${base.name}", index="${hit.index_name}", source="${hit.source}")`;
+          const location = Number.isSafeInteger(hit.byte_offset) && hit.byte_offset! >= 0
+            ? `, byte_offset=${hit.byte_offset}` : "";
+          return `${index + 1}. ${hit.index_name}/${hit.source} (score ${hit.score.toFixed(3)})\n   ${snippet}\n   knowledge_base_read(base="${base.name}", index="${hit.index_name}", source="${hit.source}"${location})`;
         }).join("\n"));
       } catch (error) {
         sections.push(`## ${base.name}\nSearch failed: ${String(error)}`);
@@ -163,21 +193,25 @@ async function indexedSource(base: KnowledgeBase, indexName: string, source: str
 }
 
 export const read = defineTool({
-  description: "Read a bounded section of a knowledge search result from its source file. Pass the base, index, and source exactly as returned by knowledge_base_search.",
+  description: "Read a bounded section of a knowledge search result from its source file. Pass the base, index, source, and optional byte_offset exactly as returned by knowledge_base_search. Use offset for character-based continuation; do not combine it with byte_offset.",
   input: z.object({
     base: z.string().optional().describe("Knowledge base name; omit for the default"),
     index: z.string().describe("Index name returned by knowledge_base_search"),
     source: z.string().describe("Source path returned by knowledge_base_search, relative to its index root"),
     offset: z.number().optional().describe("Character offset for continuation (default 0)"),
+    byte_offset: z.number().optional().describe("UTF-8 byte offset of the matching passage, returned by knowledge_base_search; do not combine with offset"),
     max_chars: z.number().optional().describe("Maximum characters (default 4000, maximum 16000)"),
   }),
   async execute(input) { return { content: await runKnowledgeRead(input) }; },
 });
 
 export async function runKnowledgeRead(input: {
-  base?: string; index: string; source: string; offset?: number; max_chars?: number;
+  base?: string; index: string; source: string; offset?: number; byte_offset?: number; max_chars?: number;
 }): Promise<string> {
   try {
+    if (input.offset !== undefined && input.byte_offset !== undefined) {
+      throw new Error("Use either offset or byte_offset, not both");
+    }
     const base = selectBases(await loadKnowledgeConfig(), input.base)[0];
     const root = await indexedSource(base, input.index, input.source);
     const file = resolveContainedPath(root, input.source);
@@ -187,7 +221,16 @@ export async function runKnowledgeRead(input: {
       throw new Error("source escapes its configured root");
     }
     const content = await readFile(realFile, "utf8");
-    const offset = Number.isFinite(input.offset) ? Math.max(0, Math.trunc(input.offset!)) : 0;
+    let offset = Number.isFinite(input.offset) ? Math.max(0, Math.trunc(input.offset!)) : 0;
+    if (input.byte_offset !== undefined) {
+      if (!Number.isSafeInteger(input.byte_offset) || input.byte_offset < 0) {
+        throw new Error("byte_offset must be a nonnegative integer");
+      }
+      const bytes = Buffer.from(content, "utf8");
+      if (input.byte_offset > bytes.length) throw new Error("byte_offset exceeds source length");
+      const prefix = new TextDecoder("utf-8", { fatal: true }).decode(bytes.subarray(0, input.byte_offset));
+      offset = Array.from(prefix).length;
+    }
     const maxChars = Number.isFinite(input.max_chars) ? Math.max(1, Math.min(16000, Math.trunc(input.max_chars!))) : DEFAULT_READ_CHARS;
     let position = 0;
     let excerpt = "";
