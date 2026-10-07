@@ -6,7 +6,13 @@ import { withMemoryDir } from "./helpers";
 test("v1 entry adapts the shared tools", async () => {
   await withMemoryDir(async () => {
     const hooks = await plugin.server({} as never);
-    expect(Object.keys(hooks.tool ?? {})).toHaveLength(13);
+    expect(Object.keys(hooks.tool ?? {})).toHaveLength(12);
+    expect(hooks.tool).toHaveProperty("session_search");
+    expect(hooks.tool).not.toHaveProperty("session_search_all");
+    expect(hooks.tool?.session_search.description).toContain("OpenCode, Pi, and Codex");
+    const sessionSchema = tool.schema.object(hooks.tool!.session_search.args);
+    expect(sessionSchema.safeParse({ query: "retry", harness: "pi" }).success).toBe(true);
+    expect(sessionSchema.safeParse({ query: "retry", harness: "unknown" }).success).toBe(false);
     expect(hooks.tool).toHaveProperty("knowledge_base_search");
     expect(hooks.tool).toHaveProperty("knowledge_base_read");
     expect(hooks.tool).not.toHaveProperty("knowledge_search");

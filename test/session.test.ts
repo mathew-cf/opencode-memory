@@ -20,6 +20,7 @@ import {
   runSessionRead,
   runAllSessionSearch,
   runSessionSearch,
+  search,
   sessionTermHits,
   termHits,
 } from "../src/tools/session";
@@ -315,6 +316,34 @@ describe("runSessionSearch", () => {
 });
 
 describe("unified session search", () => {
+  test.each(["opencode", "pi", "codex"] as const)("scopes searches to %s", async (harness) => {
+    const called: string[] = [];
+    const providers = (["OpenCode", "Pi", "Codex"] as const).map((source): SessionSearchProvider => ({
+      source,
+      search: async (request) => {
+        called.push(source.toLowerCase());
+        expect(request.query).toBe("retry");
+        expect(request.limit).toBe(2);
+        expect(request.directory).toBe("/tmp/proj");
+        expect(request.currentSessionId).toBe("current-session");
+        return `${source} result`;
+      },
+    }));
+    const output = await runAllSessionSearch({
+      query: " retry ", harness, limit: 2, directory: "/tmp/proj", currentSessionId: "current-session",
+    }, providers);
+    expect(called).toEqual([harness]);
+    expect(output).toContain(`${providers.find((provider) => provider.source.toLowerCase() === harness)!.source} result`);
+  });
+
+  test("tool forwards harness scoping to the search implementation", async () => {
+    const result = await search.execute({ query: "jitter", harness: "opencode" }, { sessionID: "test" } as never);
+    expect(result.content).toContain("### OpenCode");
+    expect(result.content).toContain("ses-c");
+    expect(result.content).not.toContain("### Pi");
+    expect(result.content).not.toContain("### Codex");
+  });
+
   test("starts OpenCode, Pi, and Codex searches concurrently", async () => {
     const started: string[] = [];
     const releases = new Map<string, () => void>();

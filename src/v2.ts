@@ -22,7 +22,6 @@ const definitions: Record<string, ToolDefinition> = {
   knowledge_base_read: knowledge.read,
   knowledge_list: knowledge.list,
   session_search: session.search,
-  session_search_all: session.searchAll,
   session_read: session.read,
   session_list: session.list,
 };
@@ -84,7 +83,7 @@ export default Plugin.define({
       ) {
         event.effect = "allow";
       }
-      if (event.agent === "explore" && /^(memory_(search|read|list|access)|knowledge_(search|read|list)|session_(search|search_all|read|list))$/.test(event.action)) {
+      if (event.agent === "explore" && /^(memory_(search|read|list|access)|knowledge_(search|read|list)|session_(search|read|list))$/.test(event.action)) {
         event.effect = "allow";
       }
     });

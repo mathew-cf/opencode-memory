@@ -22,8 +22,7 @@ The goal isn't to save everything — it's to save what took >1 minute to figure
 | `knowledge_list(base?)`           | List bases or the index names in one base |
 | `knowledge_base_search(query, base?, index?, all?)` | Search one index, one base, or all bases |
 | `knowledge_base_read(base?, index, source, byte_offset?, offset?, max_chars?)` | Read near a hit or continue through its original file |
-| `session_search(query, limit?, directory?)` | Search OpenCode session history |
-| `session_search_all(query, limit?, directory?)` | Concurrently search OpenCode, Pi, and Codex; unavailable harnesses are non-fatal |
+| `session_search(query, limit?, directory?, harness?)` | Search OpenCode, Pi, and Codex concurrently; scope with `harness` (`opencode`, `pi`, or `codex`); unavailable harnesses are non-fatal |
 | `session_read(session_id, ...)`   | Read one OpenCode session |
 | `session_list(...)`               | Browse OpenCode sessions |
 

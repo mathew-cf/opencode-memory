@@ -1,10 +1,10 @@
 /**
  * Session tools: search, list, read.
  *
- * The core search/read/list tools use OpenCode's SQLite database (WAL mode,
- * safe to query concurrently while OpenCode is running). `searchAll` fans out
- * to optional Pi and Codex providers as well. Paths are resolved lazily so
- * tests can override them.
+ * OpenCode search/read/list use its SQLite database (WAL mode,
+ * safe to query concurrently while OpenCode is running). `search` fans out
+ * to optional Pi and Codex providers, with optional harness scoping.
+ * Paths are resolved lazily so tests can override them.
  */
 
 import { existsSync } from "node:fs";
@@ -203,14 +203,17 @@ function sliceCodePointSafe(text: string, start: number, maxChars: number): { te
 
 // --- Tools -------------------------------------------------------------
 
-export const searchAll = defineTool({
+export const search = defineTool({
   description:
     "Search previous OpenCode, Pi, and Codex sessions concurrently by keyword. " +
     "Unavailable or uninstalled session backends are reported without failing available searches. " +
     "Multi-term queries match sessions containing ANY search term (OR logic); sessions matching more " +
-    "terms rank higher. Results are grouped by source; limit applies per source.",
+    "terms rank higher. Results are grouped by source; limit applies per source. " +
+    "Set harness to search only opencode, pi, or codex; omit it to search all three.",
   input: z.object({
     query: z.string().describe("Keyword or phrase to search for"),
+    harness: z.enum(["opencode", "pi", "codex"]).optional()
+      .describe("Search only this harness (default: all three)"),
     limit: z
       .number()
       .optional()
@@ -222,11 +225,12 @@ export const searchAll = defineTool({
         "Filter to sessions from a specific project directory (substring match)",
       ),
   }),
-  async execute({ query, limit = 10, directory }, context) {
+  async execute({ query, limit = 10, directory, harness }, context) {
     return { content: await runAllSessionSearch({
       query,
       limit,
       directory,
+      harness,
       currentSessionId: context.sessionID,
     }) };
   },
@@ -237,6 +241,7 @@ export async function runAllSessionSearch(
     query: string;
     limit?: number;
     directory?: string;
+    harness?: "opencode" | "pi" | "codex";
     currentSessionId?: string;
   },
   providers?: SessionSearchProvider[],
@@ -258,32 +263,11 @@ export async function runAllSessionSearch(
     { source: "Pi", search: searchPiSessions },
     { source: "Codex", search: searchCodexSessions },
   ];
-  return searchSessionProviders(request, activeProviders);
+  const scopedProviders = input.harness
+    ? activeProviders.filter((provider) => provider.source.toLowerCase() === input.harness)
+    : activeProviders;
+  return searchSessionProviders(request, scopedProviders);
 }
-
-export const search = defineTool({
-  description:
-    "Search previous OpenCode sessions by keyword. Searches both session titles and message content. " +
-    "Multi-term queries match sessions containing ANY search term (OR logic); sessions matching more " +
-    "terms rank higher. Returns matching sessions with snippets and a match_offset you can pass to " +
-    "session_read to jump directly to the relevant part of a long session.",
-  input: z.object({
-    query: z.string().describe("Keyword or phrase to search for"),
-    limit: z.number().optional().describe("Max sessions to return (default 10)"),
-    directory: z
-      .string()
-      .optional()
-      .describe("Filter to sessions from a specific project directory (substring match)"),
-  }),
-  async execute({ query, limit = 10, directory }, context) {
-    return { content: await runSessionSearch({
-      query,
-      limit,
-      directory,
-      currentSessionId: context.sessionID,
-    }) };
-  },
-});
 
 export async function runSessionSearch(input: {
   query: string;

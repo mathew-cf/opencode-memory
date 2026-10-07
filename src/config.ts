@@ -85,7 +85,6 @@ export const EXPLORE_PERMISSIONS: Record<string, string> = {
   knowledge_base_read: "allow",
   knowledge_list: "allow",
   session_search: "allow",
-  session_search_all: "allow",
   session_read: "allow",
   session_list: "allow",
 };

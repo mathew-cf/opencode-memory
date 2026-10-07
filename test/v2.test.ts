@@ -30,7 +30,11 @@ test("v2 entry registers tools, skill, prompt, permissions and guard hooks", asy
     };
 
     await plugin.setup(context as any);
-    expect(tools.size).toBe(13);
+    expect(tools.size).toBe(12);
+    expect(tools.has("session_search_all")).toBe(false);
+    expect(tools.get("session_search").description).toContain("OpenCode, Pi, and Codex");
+    expect(tools.get("session_search").input.safeParse({ query: "retry", harness: "codex" }).success).toBe(true);
+    expect(tools.get("session_search").input.safeParse({ query: "retry", harness: "unknown" }).success).toBe(false);
     expect(tools.get("knowledge_base_search").input.safeParse({ query: "test" }).success).toBe(true);
     expect(tools.has("knowledge_base_read")).toBe(true);
     expect(tools.has("knowledge_search")).toBe(false);

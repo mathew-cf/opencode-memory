@@ -144,6 +144,7 @@ describe("applyConfig", () => {
         agent?: Record<string, { permission?: Record<string, string> }>;
       }
     ).agent?.explore?.permission;
+    expect(perms).not.toHaveProperty("session_search_all");
     for (const [tool, rule] of Object.entries(EXPLORE_PERMISSIONS)) {
       expect(perms?.[tool]).toBe(rule);
     }

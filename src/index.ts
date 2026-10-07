@@ -3,7 +3,7 @@
  *
  * Wires up:
  *  - 6 memory tools (search / read / list / save / access / setup)
- *  - Session tools (cross-harness search plus OpenCode search / read / list)
+ *  - Session tools (cross-harness search plus OpenCode read / list)
  *  - 2 hooks (tool.execute.after guard + compaction context injection)
  *  - Config modifications (skill path, agent prompts, permission rules)
  */
@@ -40,10 +40,9 @@ const memoryTools: AdaptedTools<typeof memory, "search" | "read" | "list" | "sav
   setup: adaptTool(memory.setup),
 };
 
-const sessionTools: AdaptedTools<typeof session, "search" | "searchAll" | "read" | "list"> = {
+const sessionTools: AdaptedTools<typeof session, "search" | "read" | "list"> = {
   ...session,
   search: adaptTool(session.search),
-  searchAll: adaptTool(session.searchAll),
   read: adaptTool(session.read),
   list: adaptTool(session.list),
 };
@@ -96,7 +95,6 @@ const MemoryPlugin: Plugin = async () => {
     knowledge_base_read: knowledgeTools.read,
     knowledge_list: knowledgeTools.list,
     session_search: sessionTools.search,
-    session_search_all: sessionTools.searchAll,
     session_read: sessionTools.read,
     session_list: sessionTools.list,
   };
