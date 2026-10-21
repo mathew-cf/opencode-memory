@@ -9,6 +9,15 @@ import {
 } from "../src/config";
 
 describe("applyConfig", () => {
+  test("preserves network-share roots in permissions and agent prompts", () => {
+    const config: Parameters<typeof applyConfig>[0] = {};
+    applyConfig(config, { memoryDir: "\\\\server\\share\\memory" });
+    expect(config.permission?.edit).toEqual({ "//server/share/memory/**": "allow" });
+    expect(config.permission?.external_directory).toEqual({ "//server/share/memory/**": "allow" });
+    const agents = config.agent as Record<string, { prompt?: string }>;
+    expect(agents.general.prompt).toContain("//server/share/memory/{category}/{filename}.md");
+  });
+
   test("registers the bundled skill path", () => {
     const config: Record<string, unknown> = {};
     applyConfig(config, {

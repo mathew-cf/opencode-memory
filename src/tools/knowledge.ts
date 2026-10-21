@@ -1,10 +1,11 @@
 /** Read-only search across named knowledge bases. Each base owns its rag.toml. */
 import { existsSync } from "node:fs";
 import { readFile, realpath } from "node:fs/promises";
-import { isAbsolute, join, relative, resolve, sep } from "node:path";
+import { join, resolve } from "node:path";
 import { z } from "zod/v4";
 import { loadKnowledgeConfig, resolveKnowledgePath, type KnowledgeBase, type KnowledgeConfig } from "../lib/knowledge-config";
-import { normPath, resolveContainedPath } from "../lib/paths";
+import { normPath } from "../lib/paths";
+import { resolveFileContained } from "./path-access";
 import { installGuidance, parseRagJsonArray, resolveRagBinary, runRagKnowledgeSearch, type RagCommandResult } from "../lib/rag";
 import { defineTool } from "../lib/tool-definition";
 
@@ -214,12 +215,7 @@ export async function runKnowledgeRead(input: {
     }
     const base = selectBases(await loadKnowledgeConfig(), input.base)[0];
     const root = await indexedSource(base, input.index, input.source);
-    const file = resolveContainedPath(root, input.source);
-    const [realRoot, realFile] = await Promise.all([realpath(root), realpath(file)]);
-    const rel = relative(realRoot, realFile);
-    if (!rel || rel === ".." || rel.startsWith(`..${sep}`) || isAbsolute(rel)) {
-      throw new Error("source escapes its configured root");
-    }
+    const realFile = await resolveFileContained(root, input.source);
     const content = await readFile(realFile, "utf8");
     let offset = Number.isFinite(input.offset) ? Math.max(0, Math.trunc(input.offset!)) : 0;
     if (input.byte_offset !== undefined) {

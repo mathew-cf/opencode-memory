@@ -64,6 +64,34 @@ test("v2 entry registers tools, skill, prompt, permissions and guard hooks", asy
     };
     hooks.get("tool.execute.after")!(subagent);
     expect(subagent.result.content).toContain("memory_save");
+
+    // The live runtime normalizes tool results to blocks before calling hooks.
+    // A reminder must append to those blocks, retaining errors and attachments.
+    const content = [
+      { type: "text", text: "Could not read ../outside.md: path is missing or outside the memory directory" },
+      { type: "file", uri: "file:///tmp/example.txt", mime: "text/plain" },
+    ];
+    for (let i = 0; i < 8; i++) {
+      const event = {
+        tool: "read", sessionID: "blocks", status: "completed",
+        result: { content, metadata: { retained: true }, output: { retained: true } },
+      };
+      hooks.get("tool.execute.after")!(event);
+      expect(event.result.content.slice(0, 2)).toEqual(content);
+      expect(event.result.metadata).toEqual({ retained: true });
+      expect(event.result.output).toEqual({ retained: true });
+      if (i === 7) {
+        expect(event.result.content).toHaveLength(3);
+        expect(event.result.content[2]).toEqual({ type: "text", text: expect.stringContaining("memory_search") });
+      }
+    }
+    const blockSubagent = {
+      tool: "subagent", sessionID: "blocks", status: "completed",
+      result: { content: [{ type: "text", text: "## Discoveries worth saving\n- A reusable fact" }] },
+    };
+    hooks.get("tool.execute.after")!(blockSubagent);
+    expect(blockSubagent.result.content[0].text).toContain("Discoveries worth saving");
+    expect(blockSubagent.result.content.at(-1)?.text).toContain("memory_save");
     const compact = { sessionID: "test", system: [] as any[] };
     hooks.get("session.compaction")!(compact);
     expect(compact.system[0].text).toContain("MEMORY RETROSPECTIVE");

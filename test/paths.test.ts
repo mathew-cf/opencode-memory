@@ -1,11 +1,13 @@
 import { describe, expect, test } from "bun:test";
 import {
   expandHomePath,
+  containedRelativePath,
   formatMemoryDirForDisplay,
   formatMemoryPathForDisplay,
   normPath,
   normalizeDirPath,
   ragIndexDir,
+  joinPath,
   resolveContainedPath,
   resolveHome,
   resolveMemoryDir,
@@ -49,6 +51,32 @@ describe("normalizeDirPath", () => {
 
   test("preserves filesystem roots", () => {
     expect(normalizeDirPath("/")).toBe("/");
+    expect(normalizeDirPath("C:/")).toBe("C:/");
+    expect(normalizeDirPath("\\\\server\\share\\")).toBe("//server/share/");
+  });
+});
+
+describe("shared path operations", () => {
+  test("joins Windows roots without losing the drive or network share", () => {
+    expect(joinPath("C:/", "notes", "foo.md")).toBe("C:/notes/foo.md");
+    expect(joinPath("//server/share/memory", ".rag")).toBe("//server/share/memory/.rag");
+    expect(ragIndexDir("//server/share/memory")).toBe("//server/share/memory/.rag");
+  });
+
+  test("checks Windows containment with Windows case and drive semantics", () => {
+    expect(containedRelativePath("C:/Users/me/memory", "c:\\users\\me\\memory\\notes\\foo.md"))
+      .toBe("notes/foo.md");
+    for (const file of ["D:/Users/me/memory/foo.md", "C:/Users/me/memory-other/foo.md", "C:/Users/me/memory"]) {
+      expect(() => containedRelativePath("C:/Users/me/memory", file)).toThrow();
+    }
+    expect(() => containedRelativePath("//server/share/memory", "//other/share/memory/foo.md")).toThrow();
+  });
+
+  test("formats Windows homes and external drives consistently", () => {
+    expect(formatMemoryDirForDisplay("c:/users/me/memory", { HOME: "C:/Users/me" })).toBe("~/memory");
+    expect(formatMemoryDirForDisplay("D:/memory", { HOME: "C:/Users/me" })).toBe("D:/memory");
+    expect(resolveMemoryDir({ USERPROFILE: "\\\\server\\share\\user" }))
+      .toBe("//server/share/user/opencode-memory");
   });
 });
 
@@ -66,6 +94,24 @@ describe("expandHomePath", () => {
 });
 
 describe("resolveContainedPath", () => {
+  test.each([
+    ["C:/Users/me/memory", "notes/foo.md", "C:/Users/me/memory/notes/foo.md"],
+    ["C:\\Users\\me\\memory\\", "notes\\foo.md", "C:/Users/me/memory/notes/foo.md"],
+    ["C:/", "notes/foo.md", "C:/notes/foo.md"],
+    ["\\\\server\\share\\memory", "notes\\foo.md", "//server/share/memory/notes/foo.md"],
+  ])("resolves %s + %s without consulting the host cwd", (root, source, expected) => {
+    expect(resolveContainedPath(root, source)).toBe(expected);
+  });
+
+  test.each(["/tmp/memory", "C:/Users/me/memory", "//server/share/memory"])(
+    "rejects invalid children under %s",
+    (root) => {
+      for (const source of ["", ".", "notes/..", "..", "../outside.md", "..\\outside.md", "/outside.md", "\\outside.md", "C:outside.md", "D:\\outside.md", "\\\\other\\share\\foo.md", "notes/\0foo.md"]) {
+        expect(() => resolveContainedPath(root, source)).toThrow();
+      }
+    },
+  );
+
   test("resolves a nested relative path beneath the root", () => {
     expect(resolveContainedPath("/tmp/memory", "technical/foo.md")).toBe(
       "/tmp/memory/technical/foo.md",

@@ -10,6 +10,30 @@
 import { posix, win32 } from "node:path";
 import { DEFAULT_MEMORY_SUBDIR, RAG_INDEX_SUBDIR } from "../constants";
 
+/** Choose by path syntax, so Windows paths also work when tested on Unix. */
+function pathStyle(p: string): typeof posix {
+  return /^[A-Za-z]:|^[\\/]{2}[^\\/]/.test(p) ? win32 : posix;
+}
+
+export function joinPath(root: string, ...parts: string[]): string {
+  return normPath(pathStyle(root).join(root, ...parts));
+}
+
+export function relativePath(root: string, file: string): string {
+  const normalizedRoot = normPath(root);
+  return normPath(pathStyle(normalizedRoot).relative(normalizedRoot, normPath(file)));
+}
+
+/** Return a canonical relative key, rejecting the root itself and escapes. */
+export function containedRelativePath(root: string, file: string): string {
+  const relative = relativePath(root, file);
+  if (relative === "." || relative === ".." || relative.startsWith("../") ||
+      posix.isAbsolute(relative) || /^[A-Za-z]:/.test(relative)) {
+    throw new Error("Path must resolve to a file within the configured directory");
+  }
+  return relative;
+}
+
 /**
  * Resolve the user's home directory across platforms.
  *
@@ -50,15 +74,18 @@ export function resolveHome(env: NodeJS.ProcessEnv = process.env): string {
  * On macOS/Linux this is a no-op: paths already use forward slashes.
  */
 export function normPath(p: string): string {
-  return posix.normalize(p.replaceAll(win32.sep, posix.sep));
+  const forward = p.replaceAll(win32.sep, posix.sep);
+  return pathStyle(forward).normalize(forward).replaceAll(win32.sep, posix.sep);
 }
 
 /**
  * Normalize a directory path and drop redundant trailing separators. Uses
- * `path.posix.join` so the result keeps the plugin's forward-slash invariant.
+ * the root's path style so drive roots and network shares stay absolute.
  */
 export function normalizeDirPath(p: string): string {
-  return posix.join(normPath(p), ".");
+  const normalized = normPath(p);
+  const root = normPath(pathStyle(normalized).parse(normalized).root);
+  return normalized === root ? normalized : normalized.replace(/\/+$/, "");
 }
 
 /**
@@ -74,15 +101,12 @@ export function resolveContainedPath(root: string, relativePath: string): string
 
   const normalizedRoot = normalizeDirPath(root);
   const normalizedRelative = normPath(relativePath);
-  if (posix.isAbsolute(normalizedRelative) || /^[A-Za-z]:\//.test(normalizedRelative)) {
+  if (posix.isAbsolute(normalizedRelative) || /^[A-Za-z]:/.test(normalizedRelative)) {
     throw new Error("Path must be relative");
   }
 
-  const resolved = posix.resolve(normalizedRoot, normalizedRelative);
-  const relative = posix.relative(normalizedRoot, resolved);
-  if (relative === "" || relative === ".." || relative.startsWith("../") || posix.isAbsolute(relative)) {
-    throw new Error("Path must resolve to a file within the configured directory");
-  }
+  const resolved = normPath(pathStyle(normalizedRoot).resolve(normalizedRoot, normalizedRelative));
+  containedRelativePath(normalizedRoot, resolved);
   return resolved;
 }
 
@@ -96,7 +120,7 @@ export function expandHomePath(p: string, env: NodeJS.ProcessEnv = process.env):
   const normalized = normPath(p);
   if (normalized === "~") return resolveHome(env);
   if (normalized.startsWith(`~${posix.sep}`)) {
-    return posix.join(resolveHome(env), normalized.slice(2));
+    return joinPath(resolveHome(env), normalized.slice(2));
   }
   return normalized;
 }
@@ -114,7 +138,7 @@ export function resolveMemoryDir(env: NodeJS.ProcessEnv = process.env): string {
   if (env.OPENCODE_MEMORY_DIR && env.OPENCODE_MEMORY_DIR.length > 0) {
     return normalizeDirPath(expandHomePath(env.OPENCODE_MEMORY_DIR, env));
   }
-  return posix.join(resolveHome(env), DEFAULT_MEMORY_SUBDIR);
+  return joinPath(resolveHome(env), DEFAULT_MEMORY_SUBDIR);
 }
 
 /**
@@ -127,11 +151,8 @@ export function formatMemoryDirForDisplay(memoryDir: string, env: NodeJS.Process
   const normalized = normalizeDirPath(memoryDir);
   try {
     const home = resolveHome(env);
-    const relativeToHome = posix.relative(home, normalized);
-    if (relativeToHome === "") return "~";
-    if (relativeToHome && !relativeToHome.startsWith("..") && !posix.isAbsolute(relativeToHome)) {
-      return posix.join("~", relativeToHome);
-    }
+    if (relativePath(home, normalized) === ".") return "~";
+    return posix.join("~", containedRelativePath(home, normalized));
   } catch {
     // If HOME is unavailable, the absolute/normalized memoryDir is still
     // better than falling back to a hard-coded default.
@@ -149,12 +170,12 @@ export function formatMemoryPathForDisplay(
 ): string {
   const root = formatMemoryDirForDisplay(memoryDir, env);
   if (!relPath) return root;
-  return posix.join(root, normPath(relPath));
+  return joinPath(root, normPath(relPath));
 }
 
 /**
  * Convenience: the rag index directory for a given memory root.
  */
 export function ragIndexDir(memoryDir: string): string {
-  return posix.join(memoryDir, RAG_INDEX_SUBDIR);
+  return joinPath(memoryDir, RAG_INDEX_SUBDIR);
 }

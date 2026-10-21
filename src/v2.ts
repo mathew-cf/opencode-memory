@@ -49,13 +49,20 @@ export default Plugin.define({
     await ctx.tool.hook("execute.after", (event) => {
       const state = guard.getState(event.sessionID);
       const output = event.status === "completed" ? event.result.content : "";
-      const text = typeof output === "string" ? output : "";
+      const text = typeof output === "string"
+        ? output
+        : output?.filter((item) => item.type === "text").map((item) => item.text).join("\n") ?? "";
       const reminder = afterToolUpdate(state, {
         tool: event.tool === "subagent" ? "task" : event.tool,
         output: text,
       });
       if (reminder && event.status === "completed") {
-        event.result = { ...event.result, content: `${text}\n\n${reminder}` };
+        event.result = {
+          ...event.result,
+          content: typeof output === "string"
+            ? `${output}\n\n${reminder}`
+            : [...(output ?? []), { type: "text", text: reminder }],
+        };
       }
     });
 

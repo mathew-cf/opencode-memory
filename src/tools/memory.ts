@@ -8,8 +8,6 @@
 
 import { Database } from "bun:sqlite";
 import { mkdirSync } from "node:fs";
-import { realpath } from "node:fs/promises";
-import { posix } from "node:path";
 import { z } from "zod/v4";
 import { CATEGORIES } from "../constants";
 import { defineTool } from "../lib/tool-definition";
@@ -18,10 +16,13 @@ import {
   formatMemoryDirForDisplay,
   formatMemoryPathForDisplay,
   normPath,
+  joinPath,
+  relativePath,
   ragIndexDir,
   resolveContainedPath,
   resolveMemoryDir,
 } from "../lib/paths";
+import { resolveFileContained } from "./path-access";
 import { installGuidance, parseRagJsonArray, ragAvailable, ragKeywordFiles, ragSearch, resolveRagBinary, spawnRagIndex, keywordAvailable, memoryRagConfigPath } from "../lib/rag";
 import { countTermMatches, parseSearchTerms, scoreCandidate } from "../lib/search-terms";
 
@@ -34,7 +35,7 @@ function validCategory(category: string | undefined): category is (typeof CATEGO
 function withAccessDatabase<T>(memoryDir: string, run: (database: Database) => T): T {
   const indexDir = ragIndexDir(memoryDir);
   mkdirSync(indexDir, { recursive: true });
-  const database = new Database(posix.join(indexDir, "access-telemetry.sqlite"), { create: true });
+  const database = new Database(joinPath(indexDir, "access-telemetry.sqlite"), { create: true });
   try {
     database.exec("PRAGMA busy_timeout = 5000");
     database.exec(
@@ -84,7 +85,38 @@ export function parseRagHits(ragText: string): Array<{ source: string; score: nu
  * result map.
  */
 export function toRelPath(memoryDir: string, absPath: string): string {
-  return posix.relative(memoryDir, normPath(absPath));
+  return relativePath(memoryDir, absPath);
+}
+
+/** Merge both retrieval legs using the same canonical, contained file keys. */
+export function mergeMemoryHits(
+  memoryDir: string,
+  keywordPaths: string[] | undefined,
+  ragHits: ReturnType<typeof parseRagHits>,
+  category?: string,
+) {
+  const results = new Map<string, { keywordMatch: boolean; ragScore?: number; ragText?: string }>();
+  const accept = (rel: string) => {
+    try { resolveContainedPath(memoryDir, rel); } catch { return false; }
+    return rel.endsWith(".md") && !rel.startsWith(".") && !rel.endsWith("INDEX.md") &&
+      (!category || rel.startsWith(category + "/"));
+  };
+  for (const path of keywordPaths ?? []) {
+    const rel = toRelPath(memoryDir, path);
+    if (accept(rel)) results.set(rel, { keywordMatch: true });
+  }
+  for (const hit of ragHits) {
+    // Semantic sources are relative to the index root, unlike keyword paths.
+    const rel = normPath(hit.source);
+    if (!accept(rel)) continue;
+    const existing = results.get(rel) ?? { keywordMatch: false };
+    if (existing.ragScore === undefined || hit.score > existing.ragScore) {
+      existing.ragScore = hit.score;
+      existing.ragText = hit.text;
+    }
+    results.set(rel, existing);
+  }
+  return results;
 }
 
 function configuredMemoryDirLabel(memoryDir?: string): string {
@@ -210,7 +242,7 @@ export async function runSearch(input: {
   const memoryDir = resolveMemoryDir();
   const indexDir = ragIndexDir(memoryDir);
   const configPath = memoryRagConfigPath(memoryDir);
-  const searchDir = category && !configPath ? posix.join(memoryDir, category) : memoryDir;
+  const searchDir = category && !configPath ? joinPath(memoryDir, category) : memoryDir;
   const terms = parseSearchTerms(query);
   const keywordTerms = terms.length > 0 ? terms : [query];
 
@@ -221,30 +253,8 @@ export async function runSearch(input: {
     hasRag ? ragSearch({ query, indexDir, configPath, topK: 15 }) : Promise.resolve(""),
   ]);
 
-  const resultMap = new Map<string, { keywordMatch: boolean; ragScore?: number; ragText?: string }>();
-
-  if (keywordPaths) {
-    for (const line of keywordPaths) {
-      const rel = toRelPath(memoryDir, line);
-      if (rel.endsWith(".md") && !rel.startsWith(".") && (!category || !configPath || rel.startsWith(category + "/"))) {
-        resultMap.set(rel, { keywordMatch: true });
-      }
-    }
-  }
-
   const ragHits = parseRagHits(ragResultText);
-  for (const hit of ragHits) {
-    if (!hit.source.endsWith(".md")) continue;
-    try { resolveContainedPath(memoryDir, hit.source); } catch { continue; }
-    if (hit.source.endsWith("INDEX.md")) continue;
-    if (category && !hit.source.startsWith(category + "/")) continue;
-    const existing = resultMap.get(hit.source) || { keywordMatch: false };
-    if (!existing.ragScore || hit.score > existing.ragScore) {
-      existing.ragScore = hit.score;
-      existing.ragText = hit.text;
-    }
-    resultMap.set(hit.source, existing);
-  }
+  let resultMap = mergeMemoryHits(memoryDir, keywordPaths, ragHits, category);
 
   let crossCategoryFallback = false;
   if (resultMap.size === 0 && category) {
@@ -252,29 +262,11 @@ export async function runSearch(input: {
     const globalPaths = configPath
       ? keywordPaths
       : await ragKeywordFiles(memoryKeywordRequest(keywordTerms, memoryDir));
-    if (globalPaths) {
-      for (const line of globalPaths) {
-        const rel = toRelPath(memoryDir, line);
-        if (rel.endsWith(".md") && !rel.startsWith(".")) {
-          resultMap.set(rel, { keywordMatch: true });
-        }
-      }
-    }
-    for (const hit of ragHits) {
-      if (!hit.source.endsWith(".md")) continue;
-      try { resolveContainedPath(memoryDir, hit.source); } catch { continue; }
-      if (hit.source.endsWith("INDEX.md")) continue;
-      const existing = resultMap.get(hit.source) || { keywordMatch: false };
-      if (!existing.ragScore || hit.score > existing.ragScore) {
-        existing.ragScore = hit.score;
-        existing.ragText = hit.text;
-      }
-      resultMap.set(hit.source, existing);
-    }
+    resultMap = mergeMemoryHits(memoryDir, globalPaths, ragHits);
   }
 
   if (resultMap.size === 0) {
-    const scanDir = category ? posix.join(memoryDir, category) : memoryDir;
+    const scanDir = category ? joinPath(memoryDir, category) : memoryDir;
     const suggestions: string[] = [];
     try {
       const fnGlob = new Bun.Glob("**/*.md");
@@ -282,7 +274,7 @@ export async function runSearch(input: {
         if (f.includes("INDEX.md")) continue;
         const nameLower = f.toLowerCase().replace(/[-_/.]/g, " ");
         if (terms.some((t) => nameLower.includes(t.toLowerCase()))) {
-          suggestions.push(category ? `${category}/${f}` : f);
+          suggestions.push(normPath(category ? `${category}/${f}` : f));
         }
       }
     } catch {
@@ -316,7 +308,7 @@ export async function runSearch(input: {
   const telemetryCounts = accessCounts(memoryDir);
   for (const [path, info] of resultMap) {
     try {
-      const content = await Bun.file(posix.join(memoryDir, path)).text();
+      const content = await Bun.file(joinPath(memoryDir, path)).text();
       const { meta } = parseFrontmatter(content);
       const termMatches = terms.length > 0 ? countTermMatches(content, terms) : info.keywordMatch ? 1 : 0;
 
@@ -399,7 +391,8 @@ export async function runSearch(input: {
     const shownPaths = new Set(shown.map((r) => r.path));
     const relatedSuggestions: string[] = [];
     for (const r of shown) {
-      for (const rel of r.meta.related || []) {
+      for (const source of r.meta.related || []) {
+        const rel = normPath(source);
         if (!shownPaths.has(rel) && !relatedSuggestions.includes(rel)) relatedSuggestions.push(rel);
       }
     }
@@ -447,7 +440,7 @@ export async function runList(input: { category?: string }): Promise<string> {
       let count = 0;
       try {
         for await (const _ of glob.scan({
-          cwd: posix.join(memoryDir, cat),
+          cwd: joinPath(memoryDir, cat),
           dot: false,
         })) {
           count++;
@@ -461,7 +454,7 @@ export async function runList(input: { category?: string }): Promise<string> {
   }
 
   if (!validCategory(category)) return `Invalid memory category: ${category}`;
-  const catDir = posix.join(memoryDir, category);
+  const catDir = joinPath(memoryDir, category);
   const glob = new Bun.Glob("**/*.md");
   const files: Array<{
     path: string;
@@ -474,10 +467,10 @@ export async function runList(input: { category?: string }): Promise<string> {
   try {
     for await (const f of glob.scan({ cwd: catDir, dot: false })) {
       try {
-        const content = await Bun.file(posix.join(catDir, f)).text();
+        const content = await Bun.file(joinPath(catDir, f)).text();
         const { meta } = parseFrontmatter(content);
         files.push({
-          path: `${category}/${f}`,
+          path: normPath(`${category}/${f}`),
           title: meta.title || f.replace(".md", ""),
           summary: meta.summary || "",
           importance: meta.importance || "medium",
@@ -561,17 +554,6 @@ export function selectHeadingSection(body: string, heading: string): string | un
   return lines.slice(start, end).join("\n").trimEnd();
 }
 
-async function resolveRealPathContained(memoryDir: string, filePath: string): Promise<string> {
-  const [realRoot, realFile] = await Promise.all([realpath(memoryDir), realpath(filePath)]);
-  const root = normPath(realRoot);
-  const file = normPath(realFile);
-  const relative = posix.relative(root, file);
-  if (relative === "" || relative === ".." || relative.startsWith("../") || posix.isAbsolute(relative)) {
-    throw new Error("Resolved path is outside the memory directory");
-  }
-  return realFile;
-}
-
 export const read = defineTool({
   description:
     "Read a bounded portion of one memory file and automatically record successful access. " +
@@ -606,7 +588,7 @@ export async function runRead(input: {
   const memoryDir = resolveMemoryDir();
   let filePath: string;
   try {
-    filePath = await resolveRealPathContained(memoryDir, resolveContainedPath(memoryDir, input.path));
+    filePath = await resolveFileContained(memoryDir, input.path);
   } catch {
     return `Could not read ${input.path}: path is missing or outside the memory directory`;
   }
@@ -676,14 +658,15 @@ async function recordAccessAtPath(filePath: string, displayPath: string, memoryD
     const content = await Bun.file(filePath).text();
     const { meta } = parseFrontmatter(content);
     if (!content.startsWith("---\n")) return `No frontmatter in ${displayPath} — skipped`;
+    const key = toRelPath(memoryDir, resolveContainedPath(memoryDir, displayPath));
     const increment = withAccessDatabase(memoryDir, (database) => database.transaction(() => {
       database.query(
         `INSERT INTO memory_access(path, access_count, last_accessed) VALUES (?, 1, ?)
          ON CONFLICT(path) DO UPDATE SET access_count = access_count + 1, last_accessed = excluded.last_accessed`,
-      ).run(displayPath, todayISO());
+      ).run(key, todayISO());
       return database.query<{ access_count: number }, [string]>(
         "SELECT access_count FROM memory_access WHERE path = ?",
-      ).get(displayPath)?.access_count ?? 0;
+      ).get(key)?.access_count ?? 0;
     })());
     return `Recorded access for ${displayPath} (count: ${(meta.access_count ?? 0) + increment})`;
   } catch {
@@ -694,7 +677,7 @@ async function recordAccessAtPath(filePath: string, displayPath: string, memoryD
 export async function runAccess(input: { path: string }): Promise<string> {
   const memoryDir = resolveMemoryDir();
   try {
-    const filePath = await resolveRealPathContained(memoryDir, resolveContainedPath(memoryDir, input.path));
+    const filePath = await resolveFileContained(memoryDir, input.path);
     return recordAccessAtPath(filePath, input.path, memoryDir);
   } catch {
     return `Could not update ${input.path}`;

@@ -105,9 +105,12 @@ test("knowledge_base_read uses the selected index root outside the knowledge-bas
     await writeFile(join(root, "reference", "rag.toml"), '[[index]]\nname = "docs"\npath = "../repo"\n');
     await writeFile(join(root, "reference", ".rag", "docs", "meta.json"), JSON.stringify({
       source_root_from_index: relative(join(root, "reference", ".rag", "docs"), join(root, "repo")),
-      file_hashes: { "note.md": "hash", "escape.md": "hash" },
+      file_hashes: { "note.md": "hash", "nested/note.md": "hash", "escape.md": "hash" },
     }));
     await writeFile(join(root, "repo", "note.md"), "alpha 🦊 beta gamma");
+    await mkdir(join(root, "repo", "nested"));
+    await writeFile(join(root, "repo", "nested", "note.md"), "nested reference");
+    expect(await runKnowledgeRead({ index: "docs", source: "nested\\note.md" })).toContain("nested reference");
     await writeFile(join(root, "repo", ".env"), "secret");
     const result = await runKnowledgeRead({ index: "docs", source: "note.md", max_chars: 8 });
     expect(result).toContain("reference/docs/note.md");

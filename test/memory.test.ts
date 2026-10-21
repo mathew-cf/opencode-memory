@@ -11,6 +11,7 @@ import { afterAll, describe, expect, test } from "bun:test";
 import { chmod, exists, stat, symlink, unlink } from "node:fs/promises";
 import {
   memoryKeywordRequest,
+  mergeMemoryHits,
   parseRagHits,
   runAccess,
   runList,
@@ -78,6 +79,10 @@ describe("parseRagHits", () => {
 });
 
 describe("toRelPath", () => {
+  test("normalizes the root and output using Windows drive semantics", () => {
+    expect(toRelPath("C:\\Users\\me\\memory", "c:/users/me/memory/notes/foo.md")).toBe("notes/foo.md");
+    expect(toRelPath("\\\\server\\share\\memory", "//server/share/memory/notes/foo.md")).toBe("notes/foo.md");
+  });
   test("strips the memory dir prefix", () => {
     expect(toRelPath("/tmp/mem", "/tmp/mem/technical/foo.md")).toBe(
       "technical/foo.md",
@@ -88,6 +93,39 @@ describe("toRelPath", () => {
     expect(toRelPath("/tmp/mem", "\\tmp\\mem\\technical\\foo.md")).toBe(
       "/tmp/mem/technical/foo.md".replace("/tmp/mem/", ""),
     );
+  });
+});
+
+describe("mergeMemoryHits", () => {
+  const root = "C:/Users/me/memory";
+  const hits = [
+    { source: "notes\\foo.md", score: 0.6, text: "lower" },
+    { source: "notes/foo.md", score: 0.9, text: "best" },
+    { source: "notes\\foo.md", score: 0.7, text: "middle" },
+    { source: "technical\\bar.md", score: 0.8, text: "other category" },
+  ];
+
+  test("merges mixed-separator evidence and keeps the best semantic passage", () => {
+    const results = mergeMemoryHits(root, ["C:\\Users\\me\\memory\\notes\\foo.md"], hits, "notes");
+    expect([...results]).toEqual([
+      ["notes/foo.md", { keywordMatch: true, ragScore: 0.9, ragText: "best" }],
+    ]);
+  });
+
+  test("applies the same canonical keys when falling back across categories", () => {
+    expect(mergeMemoryHits(root, undefined, hits, "people").size).toBe(0);
+    const fallback = mergeMemoryHits(root, ["C:/Users/me/memory/notes/foo.md"], hits);
+    expect([...fallback.keys()]).toEqual(["notes/foo.md", "technical/bar.md"]);
+    expect(fallback.get("notes/foo.md")?.keywordMatch).toBe(true);
+  });
+
+  test("excludes escaping sources and index files in both retrieval legs", () => {
+    const sources = ["../outside.md", "C:/outside.md", "C:outside.md", "notes\\INDEX.md", "notes/foo.txt"];
+    const results = mergeMemoryHits(root,
+      ["C:/Users/me/outside.md", "C:/Users/me/memory/notes/INDEX.md"],
+      sources.map((source) => ({ source, score: 0.9, text: "ignored" })),
+    );
+    expect(results.size).toBe(0);
   });
 });
 
@@ -437,6 +475,16 @@ describe("runRead", () => {
 });
 
 describe("runAccess", () => {
+  test("shares telemetry across read and access paths with mixed separators", async () => {
+    await withMemoryDir(async (dir) => {
+      await writeMemoryFile(dir, "notes/foo.md", { title: "Foo" }, "mixed path content");
+      expect(await runRead({ path: "notes\\foo.md" })).toContain("mixed path content");
+      expect(await runAccess({ path: "notes/./foo.md" })).toContain("count: 2");
+      expect(await runAccess({ path: "notes/foo.md" })).toContain("count: 3");
+      expect(await runAccess({ path: "notes\\foo.md" })).toContain("count: 4");
+    });
+  });
+
   test("increments access_count and updates last_accessed", async () => {
     await withMemoryDir(async (dir) => {
       await writeMemoryFile(

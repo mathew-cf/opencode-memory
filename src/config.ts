@@ -8,9 +8,8 @@
  * layer this plugin on top of their own config without surprises.
  */
 
-import { posix } from "node:path";
 import { DEFAULT_MEMORY_SUBDIR } from "./constants";
-import { formatMemoryDirForDisplay, normalizeDirPath, resolveMemoryDir } from "./lib/paths";
+import { formatMemoryDirForDisplay, joinPath, normalizeDirPath, resolveMemoryDir } from "./lib/paths";
 
 /**
  * The snippet appended to subagent prompts. Captured in one place so
@@ -115,7 +114,7 @@ export function applyConfig(config: ConfigLike, options: { skillsDir?: string; m
 
   // --- permission rules — allow the tools to touch the memory dir ---
   const memoryDir = normalizeDirPath(options.memoryDir ?? resolveMemoryDir());
-  const memoryGlob = posix.join(memoryDir, "**");
+  const memoryGlob = joinPath(memoryDir, "**");
   config.permission = config.permission || {};
 
   if (typeof config.permission.edit !== "string") {
