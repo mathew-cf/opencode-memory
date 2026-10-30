@@ -54,7 +54,7 @@
     "persistence"
   ],
   "dependencies": {
-    "@mathew-cf/rag-cli": "^2.0.0",
+    "@mathew-cf/rag-cli": "^2.1.0",
     "zod": "^3.25.0"
   },
   "devDependencies": {

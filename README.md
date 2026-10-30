@@ -167,7 +167,7 @@ Each directory must contain `rag.toml` (or `.rag.toml`) with one or more
 honors that file's `[search]` settings, including `hybrid = true`. The plugin
 does not build knowledge-base indexes or write to source repositories.
 
-With a rag-cli version supporting multi-directory indexes, a source entry can use
+With rag-cli 2.1 or newer, a source entry can use
 `paths = ["../service-a/docs", "../service-b/docs"]` instead of `path = "docs"`.
 Specify exactly one field, with a nonempty list for `paths`. All directories share
 one index; result source names are relative to their canonical common ancestor.

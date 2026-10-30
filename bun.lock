@@ -5,7 +5,7 @@
     "": {
       "name": "@mathew-cf/opencode-memory",
       "dependencies": {
-        "@mathew-cf/rag-cli": "^2.0.0",
+        "@mathew-cf/rag-cli": "^2.1.0",
         "zod": "^3.25.0",
       },
       "devDependencies": {
@@ -90,17 +90,17 @@
 
     "@isaacs/string-locale-compare": ["@isaacs/string-locale-compare@1.1.0", "", {}, "sha512-SQ7Kzhh9+D+ZW9MA0zkYv3VXhIDNx+LzM6EJ+/65I3QY+enU6Itte7E5XX7EWrqLW2FN4n06GWzBnPoC3th2aQ=="],
 
-    "@mathew-cf/rag-cli": ["@mathew-cf/rag-cli@2.0.0", "", { "optionalDependencies": { "@mathew-cf/rag-cli-darwin-arm64": "2.0.0", "@mathew-cf/rag-cli-darwin-x64": "2.0.0", "@mathew-cf/rag-cli-linux-arm64": "2.0.0", "@mathew-cf/rag-cli-linux-x64": "2.0.0", "@mathew-cf/rag-cli-win32-x64": "2.0.0" }, "bin": { "rag": "bin/rag.js" } }, "sha512-/Ydl+iG596z33ChX+zUtsDsNyt1hvjHp0HXyUwq1amoikTa11XhZ4wcfhVXKq0WoTq+ZQob7uXc3D4Ftlg53TA=="],
+    "@mathew-cf/rag-cli": ["@mathew-cf/rag-cli@2.1.0", "", { "optionalDependencies": { "@mathew-cf/rag-cli-darwin-arm64": "2.1.0", "@mathew-cf/rag-cli-darwin-x64": "2.1.0", "@mathew-cf/rag-cli-linux-arm64": "2.1.0", "@mathew-cf/rag-cli-linux-x64": "2.1.0", "@mathew-cf/rag-cli-win32-x64": "2.1.0" }, "bin": { "rag": "bin/rag.js" } }, "sha512-VvGYz6nkc4IZl5rTs56hK96F/sv3pxkO8XeIVjoaVeoiM9I5t5f1AqZHcB3wFOgHyWb4FEcLB6/oXs7UuBPWUQ=="],
 
-    "@mathew-cf/rag-cli-darwin-arm64": ["@mathew-cf/rag-cli-darwin-arm64@2.0.0", "", { "os": "darwin", "cpu": "arm64" }, "sha512-ZBEkIFq5pPr3I3jmbkfvQMwKw3rlX/25o0T99g6s/xplOIwPc+7llSAPUuBtSb0UBA4xfhKkhidHFNf7g74CtA=="],
+    "@mathew-cf/rag-cli-darwin-arm64": ["@mathew-cf/rag-cli-darwin-arm64@2.1.0", "", { "os": "darwin", "cpu": "arm64" }, "sha512-S+7LiXStHwffFPMgMM0T+KkbXhPB7NMIMkNRQnvv3H4nZTsFkmcL4y5puBhERHOTfKxP2TtEbb8cA4qJSalVjg=="],
 
-    "@mathew-cf/rag-cli-darwin-x64": ["@mathew-cf/rag-cli-darwin-x64@2.0.0", "", { "os": "darwin", "cpu": "x64" }, "sha512-IaASedn/y7mRtIkXuKoD0ACTqZRoydjqccAMjecMC8hyjjJIo69R+PwDg1U4MR6lq/7TOV7djdEMW3UPDz4/bA=="],
+    "@mathew-cf/rag-cli-darwin-x64": ["@mathew-cf/rag-cli-darwin-x64@2.1.0", "", { "os": "darwin", "cpu": "x64" }, "sha512-uJWuPF3FBdKAli4mV+mHZBdipMyRX3MFafJ7e+VEZ7NvChXyXUWeNy66xCBoJlqEpm/w96rHU4TC4kwOZmGBDA=="],
 
-    "@mathew-cf/rag-cli-linux-arm64": ["@mathew-cf/rag-cli-linux-arm64@2.0.0", "", { "os": "linux", "cpu": "arm64" }, "sha512-/w4/L/M4LqLK9dEn5XrUeiNRTxdfwdrwD7m2q7OcepePllw4Cnm7UYjSYxOebyyNdhBLSriEHhrFtkq8gOTFag=="],
+    "@mathew-cf/rag-cli-linux-arm64": ["@mathew-cf/rag-cli-linux-arm64@2.1.0", "", { "os": "linux", "cpu": "arm64" }, "sha512-sywq8+N8TUy2tQVzBYXNclEdvF7/8vVXpqxqh/NGN3khcx517DVUiv+0AAte34NDVcKlIRlHgGQwF7i2LgbFrw=="],
 
-    "@mathew-cf/rag-cli-linux-x64": ["@mathew-cf/rag-cli-linux-x64@2.0.0", "", { "os": "linux", "cpu": "x64" }, "sha512-cLpEeoL3K2XTOA7UEHX5AJCeoaB4psTEWNxeF+gvZtXagIr0LRIuVcmw5NLSoHiBPIt8CbhQE7xCzQujNXr1NA=="],
+    "@mathew-cf/rag-cli-linux-x64": ["@mathew-cf/rag-cli-linux-x64@2.1.0", "", { "os": "linux", "cpu": "x64" }, "sha512-x/ot/2W08GWd+jWHh4CCsZoa5Vmm4vLfh2+8nRdsi0MYodj2gt2rcZm2il9iYEryHu9fkwjwh5LO9UYAPmWqnw=="],
 
-    "@mathew-cf/rag-cli-win32-x64": ["@mathew-cf/rag-cli-win32-x64@2.0.0", "", { "os": "win32", "cpu": "x64" }, "sha512-YE8QDzO+0l5/fgrbtTaslD7eUy1Zbj0aSqe+AMAhANRLswOxT5weGYRA0iSuPk46qkDA8aIdZ1Kd1YmK5/I9FQ=="],
+    "@mathew-cf/rag-cli-win32-x64": ["@mathew-cf/rag-cli-win32-x64@2.1.0", "", { "os": "win32", "cpu": "x64" }, "sha512-EdSmvZBQsHO6ru+wlYjxJR/vWU5CTeXrBpaHb5wphhBcvSdVSuso8x79SyudL+5Xm3LVoHv+G3E3sKkCAQu4JQ=="],
 
     "@msgpackr-extract/msgpackr-extract-darwin-arm64": ["@msgpackr-extract/msgpackr-extract-darwin-arm64@3.0.3", "", { "os": "darwin", "cpu": "arm64" }, "sha512-QZHtlVgbAdy2zAqNA9Gu1UpIuI8Xvsd1v8ic6B2pZmeFnFcMWiPLfWXh7TVw4eGEZ/C9TH281KwhVoeQUKbyjw=="],
 
