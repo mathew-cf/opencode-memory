@@ -1,7 +1,7 @@
 /** Read-only search across named knowledge bases. Each base owns its rag.toml. */
 import { existsSync } from "node:fs";
-import { readFile, realpath } from "node:fs/promises";
-import { join, resolve } from "node:path";
+import { readFile, realpath, stat } from "node:fs/promises";
+import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { z } from "zod/v4";
 import { loadKnowledgeConfig, resolveKnowledgePath, type KnowledgeBase, type KnowledgeConfig } from "../lib/knowledge-config";
 import { normPath } from "../lib/paths";
@@ -162,15 +162,43 @@ export async function runKnowledgeSearch(
   }
 }
 
-async function indexedSource(base: KnowledgeBase, indexName: string, source: string): Promise<string> {
+function insideDirectory(root: string, path: string): boolean {
+  const child = relative(root, path);
+  return child === "" || (!isAbsolute(child) && child !== ".." && !child.startsWith(`..${sep}`));
+}
+
+async function configuredSourceRoots(entry: Record<string, unknown>, ragConfig: string): Promise<{ root: string; selected?: string[] }> {
+  if (typeof entry.path === "string" && entry.paths === undefined) {
+    return { root: resolveKnowledgePath(entry.path, ragConfig) };
+  }
+  if (entry.path !== undefined || !Array.isArray(entry.paths) || entry.paths.length === 0 ||
+      !entry.paths.every((path): path is string => typeof path === "string")) {
+    throw new Error("Index requires exactly one of path or nonempty paths");
+  }
+  const selected = await Promise.all(entry.paths.map(async (path) => {
+    const resolved = await realpath(resolveKnowledgePath(path, ragConfig));
+    if (!(await stat(resolved)).isDirectory()) throw new Error(`Source is not a directory: ${resolved}`);
+    return resolved;
+  }));
+  let root = selected[0];
+  while (!selected.every((path) => insideDirectory(root, path))) {
+    const parent = dirname(root);
+    if (parent === root) throw new Error("Sources do not share a filesystem root");
+    root = parent;
+  }
+  return { root, selected };
+}
+
+async function indexedSource(base: KnowledgeBase, indexName: string, source: string): Promise<{ root: string; selected?: string[] }> {
   const ragConfig = ragConfigForBase(base);
   if (!ragConfig) throw new Error(`Missing rag.toml in ${base.path}`);
   const parsed = Bun.TOML.parse(await readFile(ragConfig, "utf8")) as Record<string, unknown>;
   const indexes = parsed.index;
   if (!Array.isArray(indexes)) throw new Error(`No indexes in ${ragConfig}`);
   const entry = indexes.find((row) => row && typeof row === "object" && (row as Record<string, unknown>).name === indexName) as Record<string, unknown> | undefined;
-  if (!entry || typeof entry.path !== "string") throw new Error(`Unknown index ${indexName} in ${base.name}`);
-  const root = resolveKnowledgePath(entry.path, ragConfig);
+  if (!entry) throw new Error(`Unknown index ${indexName} in ${base.name}`);
+  const roots = await configuredSourceRoots(entry, ragConfig);
+  const { root } = roots;
   const output = entry.output === undefined
     ? join(base.path, ".rag", indexName)
     : typeof entry.output === "string"
@@ -190,7 +218,7 @@ async function indexedSource(base: KnowledgeBase, indexName: string, source: str
     realpath(root), realpath(resolve(output, meta.source_root_from_index)),
   ]);
   if (configuredRoot !== indexedRoot) throw new Error(`Index ${indexName} was built from a different source directory`);
-  return root;
+  return roots;
 }
 
 export const read = defineTool({
@@ -214,8 +242,11 @@ export async function runKnowledgeRead(input: {
       throw new Error("Use either offset or byte_offset, not both");
     }
     const base = selectBases(await loadKnowledgeConfig(), input.base)[0];
-    const root = await indexedSource(base, input.index, input.source);
+    const { root, selected } = await indexedSource(base, input.index, input.source);
     const realFile = await resolveFileContained(root, input.source);
+    if (selected && !selected.some((directory) => insideDirectory(directory, realFile))) {
+      throw new Error(`Source is outside configured paths: ${input.source}`);
+    }
     const content = await readFile(realFile, "utf8");
     let offset = Number.isFinite(input.offset) ? Math.max(0, Math.trunc(input.offset!)) : 0;
     if (input.byte_offset !== undefined) {

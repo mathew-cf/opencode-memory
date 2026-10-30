@@ -97,6 +97,31 @@ test("search limits a base to one configured index and preserves the hit locatio
   });
 });
 
+test("knowledge_base_read uses one common root for paths and rejects unselected sources", async () => {
+  await withKnowledgeConfig('[[knowledge_base]]\nname = "reference"\npath = "./reference"\n', async (root) => {
+    const base = join(root, "reference");
+    const output = join(base, ".rag", "docs");
+    for (const path of [output, join(root, "repos/a/docs"), join(root, "repos/b/docs"), join(root, "repos/other")]) {
+      await mkdir(path, { recursive: true });
+    }
+    await writeFile(join(base, "rag.toml"), '[[index]]\nname = "docs"\npaths = ["../repos/a/docs", "../repos/b/docs"]\n');
+    await writeFile(join(root, "repos/a/docs/note.md"), "Source A");
+    await writeFile(join(root, "repos/b/docs/note.md"), "Source B");
+    await writeFile(join(root, "repos/other/note.md"), "Unselected");
+    await writeFile(join(output, "meta.json"), JSON.stringify({
+      source_root_from_index: relative(output, join(root, "repos")),
+      file_hashes: { "a/docs/note.md": "hash", "b/docs/note.md": "hash", "other/note.md": "hash" },
+    }));
+    expect(await runKnowledgeRead({ index: "docs", source: "a/docs/note.md" })).toContain("Source A");
+    expect(await runKnowledgeRead({ index: "docs", source: "b/docs/note.md" })).toContain("Source B");
+    expect(await runKnowledgeRead({ index: "docs", source: "other/note.md" })).toContain("outside configured paths");
+    await writeFile(join(base, "rag.toml"), '[[index]]\nname = "docs"\npath = "../repos"\npaths = ["../repos/a/docs"]\n');
+    expect(await runKnowledgeRead({ index: "docs", source: "a/docs/note.md" })).toContain("exactly one");
+    await writeFile(join(base, "rag.toml"), '[[index]]\nname = "docs"\npaths = []\n');
+    expect(await runKnowledgeRead({ index: "docs", source: "a/docs/note.md" })).toContain("exactly one");
+  });
+});
+
 test("knowledge_base_read uses the selected index root outside the knowledge-base directory", async () => {
   await withKnowledgeConfig('[[knowledge_base]]\nname = "reference"\npath = "./reference"\n', async (root) => {
     await mkdir(join(root, "reference"));
